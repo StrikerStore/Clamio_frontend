@@ -2,6 +2,9 @@
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api'
 
+// For production deployment, you can override here:
+// const API_BASE_URL = 'https://your-production-backend.com/api'
+
 // Log API configuration in development
 if (process.env.NODE_ENV === 'development') {
   console.log('🔧 API Configuration:', {
@@ -59,7 +62,7 @@ class ApiClient {
 
   // Authentication methods
   async generateAuthHeader(email: string, password: string): Promise<ApiResponse> {
-    return this.makeRequest('/auth/generate-header', {
+    return this.makeRequest('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password })
     })
@@ -73,6 +76,16 @@ class ApiClient {
 
   async getProfile(): Promise<ApiResponse> {
     return this.makeRequest('/auth/profile')
+  }
+
+  async verifyToken(): Promise<ApiResponse> {
+    return this.makeRequest('/auth/verify')
+  }
+
+  async refreshToken(): Promise<ApiResponse> {
+    return this.makeRequest('/auth/refresh', {
+      method: 'POST'
+    })
   }
 
   async changePassword(oldPassword: string, newPassword: string, confirmPassword: string): Promise<ApiResponse> {
