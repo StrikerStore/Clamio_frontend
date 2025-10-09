@@ -83,6 +83,9 @@ Desktop.ini
 .yarn/install-state.gz
 .pnp.*
 
+# PNPM (ignore if using npm)
+pnpm-lock.yaml
+
 # Temporary files
 *.log
 *.tmp
