@@ -9,12 +9,13 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
-  // Vercel optimizations
-  output: 'standalone',
-  serverExternalPackages: ['mysql2'],
-  // Environment variables for build time
-  env: {
-    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
+  experimental: {
+    optimizePackageImports: ['lucide-react'],
+  },
+  // Suppress hydration warnings for browser extensions
+  onDemandEntries: {
+    maxInactiveAge: 25 * 1000,
+    pagesBufferLength: 2,
   },
 }
 
