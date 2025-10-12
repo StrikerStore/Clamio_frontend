@@ -26,6 +26,10 @@ export default withPWA({
   register: true,
   skipWaiting: true,
   disable: process.env.NODE_ENV === 'development',
+  // Ensure service worker updates are applied immediately
+  buildExcludes: [/middleware-manifest\.json$/],
+  // Exclude dynamic routes from pre-caching
+  dynamicStartUrl: false,
   runtimeCaching: [
     {
       urlPattern: /^https:\/\/fonts\.(?:gstatic)\.com\/.*/i,
@@ -155,8 +159,16 @@ export default withPWA({
         const isSameOrigin = self.origin === url.origin;
         if (!isSameOrigin) return false;
         const pathname = url.pathname;
-        // Exclude /api routes
-        if (pathname.startsWith('/api/')) return false;
+        
+        // NEVER cache these authentication-sensitive routes
+        if (pathname === '/' || 
+            pathname.startsWith('/api/') ||
+            pathname.startsWith('/vendor/') ||
+            pathname.startsWith('/admin/') ||
+            pathname.startsWith('/superadmin/')) {
+          return false;
+        }
+        
         return true;
       },
       handler: 'NetworkFirst',
@@ -167,6 +179,24 @@ export default withPWA({
           maxAgeSeconds: 24 * 60 * 60 // 24 hours
         },
         networkTimeoutSeconds: 10
+      }
+    },
+    // Special handling for authenticated pages - always use network first
+    {
+      urlPattern: ({ url }) => {
+        const pathname = url.pathname;
+        return pathname.startsWith('/vendor/') || 
+               pathname.startsWith('/admin/') || 
+               pathname.startsWith('/superadmin/');
+      },
+      handler: 'NetworkFirst',
+      options: {
+        cacheName: 'authenticated-pages',
+        networkTimeoutSeconds: 3,
+        expiration: {
+          maxEntries: 10,
+          maxAgeSeconds: 60 // Only cache for 1 minute
+        }
       }
     }
   ]
