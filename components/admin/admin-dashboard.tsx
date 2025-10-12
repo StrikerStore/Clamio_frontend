@@ -64,6 +64,7 @@ import { useToast } from "@/hooks/use-toast"
 import { apiClient } from "@/lib/api"
 import { useEffect, useMemo } from "react"
 import { useDeviceType } from "@/hooks/use-mobile"
+import { InventoryAggregation } from "@/components/admin/inventory/inventory-aggregation"
 
 // Mock data for admin dashboard
 const mockVendors = [
@@ -1473,7 +1474,7 @@ export function AdminDashboard() {
             <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
               {/* Fixed Controls Section */}
               <div className={`sticky ${isMobile ? 'top-16' : 'top-20'} bg-white z-40 pb-3 sm:pb-4 border-b mb-3 sm:mb-4`}>
-                <TabsList className={`grid w-full grid-cols-3 ${isMobile ? 'h-auto mb-3 sm:mb-4' : 'mb-6'}`}>
+                <TabsList className={`grid w-full grid-cols-4 ${isMobile ? 'h-auto mb-3 sm:mb-4' : 'mb-6'}`}>
                   <TabsTrigger value="orders" className={`${isMobile ? 'text-xs sm:text-sm px-1.5 sm:px-2 py-2.5 sm:py-3' : ''}`}>
                     Orders ({ordersStats.totalOrders})
                   </TabsTrigger>
@@ -1482,6 +1483,9 @@ export function AdminDashboard() {
                   </TabsTrigger>
                   <TabsTrigger value="carrier" className={`${isMobile ? 'text-xs sm:text-sm px-1.5 sm:px-2 py-2.5 sm:py-3' : ''}`}>
                     Carrier ({carriers.length})
+                  </TabsTrigger>
+                  <TabsTrigger value="inventory" className={`${isMobile ? 'text-xs sm:text-sm px-1.5 sm:px-2 py-2.5 sm:py-3' : ''}`}>
+                    Inventory
                   </TabsTrigger>
                   {/* Settlement Management Tab - Hidden for now */}
                   {/* <TabsTrigger value="settlement-management" className={`${isMobile ? 'text-xs sm:text-sm px-1.5 sm:px-2 py-2.5 sm:py-3' : ''}`}>
@@ -2532,6 +2536,11 @@ export function AdminDashboard() {
                       </>
                     )}
                   </div>
+                </TabsContent>
+
+                {/* Inventory Tab */}
+                <TabsContent value="inventory" className="mt-0">
+                  <InventoryAggregation />
                 </TabsContent>
 
                 {/* Settlement Management Tab - Hidden for now (tab trigger is commented out, content kept for future use) */}
