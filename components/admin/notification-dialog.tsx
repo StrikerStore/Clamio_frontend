@@ -20,7 +20,7 @@ import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
 import { apiClient } from '@/lib/api';
 import { simpleNotificationService } from '@/lib/simpleNotificationService';
-import { formatDistanceToNow } from 'date-fns';
+import { formatDistanceToNow, isToday, isYesterday, format } from 'date-fns';
 
 interface Notification {
   id: number;
@@ -320,6 +320,56 @@ export function NotificationDialog({
     }
   };
 
+  // Group notifications by date
+  const groupNotificationsByDate = (notifications: Notification[]) => {
+    const grouped: { [key: string]: Notification[] } = {};
+    
+    notifications.forEach(notification => {
+      const date = new Date(notification.created_at);
+      let dateKey: string;
+      
+      if (isToday(date)) {
+        dateKey = 'Today';
+      } else if (isYesterday(date)) {
+        dateKey = 'Yesterday';
+      } else {
+        dateKey = format(date, 'MMM dd, yyyy');
+      }
+      
+      if (!grouped[dateKey]) {
+        grouped[dateKey] = [];
+      }
+      grouped[dateKey].push(notification);
+    });
+    
+    // Sort dates with Today first, then Yesterday, then chronological order
+    const sortedKeys = Object.keys(grouped).sort((a, b) => {
+      if (a === 'Today') return -1;
+      if (b === 'Today') return 1;
+      if (a === 'Yesterday') return -1;
+      if (b === 'Yesterday') return 1;
+      
+      // For other dates, sort chronologically (newest first)
+      const dateA = new Date(a);
+      const dateB = new Date(b);
+      return dateB.getTime() - dateA.getTime();
+    });
+    
+    return { grouped, sortedKeys };
+  };
+
+  // Format time for notification rows (time only)
+  const formatNotificationTime = (dateString: string) => {
+    const date = new Date(dateString);
+    return format(date, 'HH:mm');
+  };
+
+  // Format full date for resolution dialog
+  const formatFullDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return format(date, 'MMM dd, yyyy \'at\' HH:mm');
+  };
+
   // Load notification status
   const loadNotificationStatus = useCallback(async () => {
     try {
@@ -575,73 +625,93 @@ export function NotificationDialog({
                     No notifications found
                   </div>
                 ) : (
-                  <div className="space-y-0.5">
-                    {notifications.map((notification) => (
-                      <Card 
-                        key={notification.id} 
-                        className={`cursor-pointer hover:shadow-md transition-all duration-200 ${getStatusRowColor(notification.status)}`}
-                        onClick={() => {
-                          if (notification.status === 'pending') {
-                            setSelectedNotification(notification);
-                          }
-                        }}
-                      >
-                        <CardContent className="p-1.5">
-                          <div className="space-y-1.5">
-                            <div className="flex items-start gap-2">
-                              <div className="flex-shrink-0 mt-0.5">
-                                {getSeverityIcon(notification.severity)}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <h4 className="font-medium text-sm break-words leading-tight">{notification.title}</h4>
-                              </div>
+                  (() => {
+                    const { grouped, sortedKeys } = groupNotificationsByDate(notifications);
+                    return (
+                      <div className="space-y-3">
+                        {sortedKeys.map((dateKey) => (
+                          <div key={dateKey}>
+                            <div className="sticky top-0 bg-white py-2 border-b border-gray-200">
+                              <h3 className="text-sm font-semibold text-gray-700">{dateKey}</h3>
                             </div>
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <Badge className={`text-xs px-1.5 py-0.5 ${getSeverityColor(notification.severity)}`}>
-                                  {notification.severity}
-                                </Badge>
-                                <div className="flex items-center gap-1">
-                                  {getStatusIcon(notification.status)}
-                                  <span className="text-xs text-gray-500 capitalize">
-                                    {notification.status.replace('_', ' ')}
-                                  </span>
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-0.5 flex-shrink-0">
-                                {notification.status === 'pending' && (
-                                  <>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setSelectedNotification(notification);
-                                      }}
-                                      className="text-blue-600 hover:text-blue-700 p-1 h-5 w-5"
-                                    >
-                                      <Eye className="w-3 h-3" />
-                                    </Button>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleDismissNotification(notification.id);
-                                      }}
-                                      className="text-red-600 hover:text-red-700 p-1 h-5 w-5"
-                                    >
-                                      <Trash2 className="w-3 h-3" />
-                                    </Button>
-                                  </>
-                                )}
-                              </div>
+                            <div className="space-y-0.5 mt-2">
+                              {grouped[dateKey].map((notification) => (
+                                <Card 
+                                  key={notification.id} 
+                                  className={`cursor-pointer hover:shadow-md transition-all duration-200 ${getStatusRowColor(notification.status)}`}
+                                  onClick={() => {
+                                    if (notification.status === 'pending') {
+                                      setSelectedNotification(notification);
+                                    }
+                                  }}
+                                >
+                                  <CardContent className="p-1.5">
+                                    <div className="space-y-1.5">
+                                      <div className="flex items-start gap-2">
+                                        <div className="flex-shrink-0 mt-0.5">
+                                          {getSeverityIcon(notification.severity)}
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                          <h4 className="font-medium text-sm break-words leading-tight">{notification.title}</h4>
+                                        </div>
+                                      </div>
+                                      <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                          <Badge className={`text-xs px-1.5 py-0.5 ${getSeverityColor(notification.severity)}`}>
+                                            {notification.severity}
+                                          </Badge>
+                                          <div className="flex items-center gap-1">
+                                            {getStatusIcon(notification.status)}
+                                            <span className="text-xs text-gray-500 capitalize">
+                                              {notification.status.replace('_', ' ')}
+                                            </span>
+                                          </div>
+                                          <div className="flex items-center gap-1">
+                                            <Clock className="w-3 h-3 text-gray-400" />
+                                            <span className="text-xs text-gray-500">
+                                              {formatNotificationTime(notification.created_at)}
+                                            </span>
+                                          </div>
+                                        </div>
+                                        <div className="flex items-center gap-0.5 flex-shrink-0">
+                                          {notification.status === 'pending' && (
+                                            <>
+                                              <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  setSelectedNotification(notification);
+                                                }}
+                                                className="text-blue-600 hover:text-blue-700 p-1 h-5 w-5"
+                                              >
+                                                <Eye className="w-3 h-3" />
+                                              </Button>
+                                              <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  handleDismissNotification(notification.id);
+                                                }}
+                                                className="text-red-600 hover:text-red-700 p-1 h-5 w-5"
+                                              >
+                                                <Trash2 className="w-3 h-3" />
+                                              </Button>
+                                            </>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </CardContent>
+                                </Card>
+                              ))}
                             </div>
                           </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
+                        ))}
+                      </div>
+                    );
+                  })()
                 )}
               </ScrollArea>
 
@@ -720,6 +790,12 @@ export function NotificationDialog({
                     <span className="font-medium">Severity:</span>
                     <span className={`capitalize ${selectedNotification.severity === 'critical' ? 'text-red-600' : selectedNotification.severity === 'high' ? 'text-orange-600' : 'text-gray-600'}`}>
                       {selectedNotification.severity}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="font-medium">Created:</span>
+                    <span className="text-gray-600">
+                      {formatFullDate(selectedNotification.created_at)}
                     </span>
                   </div>
                   {selectedNotification.vendor_name && (
