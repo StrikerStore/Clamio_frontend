@@ -19,7 +19,6 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
 import { apiClient } from '@/lib/api';
-import { pushNotificationService } from '@/lib/pushNotifications';
 import { simpleNotificationService } from '@/lib/simpleNotificationService';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -91,11 +90,10 @@ export function NotificationDialog({
     search: ''
   });
   
-  // Push notification state
-  const [pushEnabled, setPushEnabled] = useState(false);
-  const [pushSupported, setPushSupported] = useState(false);
-  const [pushSubscribed, setPushSubscribed] = useState(false);
-  const [pushPermission, setPushPermission] = useState<NotificationPermission>('default');
+  // Simple notification state
+  const [notificationEnabled, setNotificationEnabled] = useState(false);
+  const [notificationSupported, setNotificationSupported] = useState(false);
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>('default');
   
   // UI state
   const [showFilters, setShowFilters] = useState(false);
@@ -139,127 +137,31 @@ export function NotificationDialog({
   }, [page, filters, toast]);
 
   // Load push notification status
-  const loadPushStatus = useCallback(async () => {
-    try {
-      console.log('🔔 Loading push notification status...');
-      
-      // Check browser support first
-      const isSupported = 'Notification' in window;
-      setPushSupported(isSupported);
-      
-      if (!isSupported) {
-        console.log('🔔 Notifications not supported in this browser');
-        setPushEnabled(false);
-        setPushSubscribed(false);
-        setPushPermission('denied');
-        return;
-      }
-      
-      // Get current browser permission
-      const browserPermission = Notification.permission;
-      setPushPermission(browserPermission);
-      console.log('🔔 Browser permission:', browserPermission);
-      
-      // Try to get subscription status from backend
-      let backendSubscribed = false;
-      try {
-        const response = await apiClient.getPushNotificationStatus();
-        if (response.success) {
-          backendSubscribed = response.data.isSubscribed;
-          console.log('🔔 Backend subscription status:', backendSubscribed);
-        }
-      } catch (apiError: any) {
-        console.log('🔔 Backend status not available:', apiError.message);
-        // Don't set backendSubscribed to false here - let browser permission take precedence
-      }
-      
-      // Determine final state based on browser permission
-      if (browserPermission === 'granted') {
-        // Browser permission is granted - notifications should be enabled
-        setPushEnabled(true);
-        setPushSubscribed(true);
-        console.log('🔔 Notifications enabled (browser permission granted)');
-      } else if (browserPermission === 'denied') {
-        // Browser permission is denied - notifications should be disabled
-        setPushEnabled(false);
-        setPushSubscribed(false);
-        console.log('🔔 Notifications disabled (browser permission denied)');
-      } else {
-        // Default state - permission not requested yet
-        setPushEnabled(false);
-        setPushSubscribed(false);
-        console.log('🔔 Notifications disabled (permission not requested)');
-      }
-      
-    } catch (error) {
-      console.error('❌ Error loading push status:', error);
-      // Set safe defaults on error
-      setPushEnabled(false);
-      setPushSubscribed(false);
-      setPushPermission('denied');
-    }
-  }, []);
 
-  // Subscribe to push notifications
-  const handlePushSubscribe = async () => {
+  // Enable notifications (simple approach)
+  const handleNotificationEnable = async () => {
     try {
       console.log('🔔 Attempting to enable notifications...');
       
-      // Check if browser supports notifications
-      if (!('Notification' in window)) {
-        throw new Error('This browser does not support notifications');
-      }
-
-      // Check current permission first
-      const currentPermission = Notification.permission;
-      console.log('🔔 Current permission:', currentPermission);
+      const enabled = await simpleNotificationService.enable();
       
-      if (currentPermission === 'denied') {
-        throw new Error('Notification permission was denied. Please enable notifications in your browser settings.');
-      }
-
-      // Try push notifications first (proper database subscription)
-      try {
-        console.log('🔔 Attempting to subscribe to push notifications...');
-        const success = await pushNotificationService.subscribe();
-        
-        if (success) {
-          setPushSubscribed(true);
-          setPushEnabled(true);
-          toast({
-            title: "Success",
-            description: "Push notifications enabled successfully",
-          });
-          console.log('✅ Push notifications enabled successfully');
-          return;
-        }
-      } catch (pushError: any) {
-        console.log('🔔 Push notifications failed, falling back to simple notifications:', pushError.message);
-        
-        // Fallback to simple notifications (works without VAPID keys)
-        console.log('🔔 Requesting browser notification permission...');
-        const enabled = await simpleNotificationService.enable();
-        
-        if (enabled) {
-          setPushSubscribed(true);
-          setPushEnabled(true);
-          toast({
-            title: "Success",
-            description: "Browser notifications enabled successfully (Push notifications not available)",
-          });
-          console.log('✅ Browser notifications enabled successfully');
-          return;
-        } else {
-          throw new Error('Notification permission denied by user');
-        }
+      if (enabled) {
+        setNotificationEnabled(true);
+        setNotificationPermission(simpleNotificationService.currentPermission);
+        toast({
+          title: "Success",
+          description: "Notifications enabled successfully",
+        });
+        console.log('✅ Notifications enabled successfully');
+      } else {
+        throw new Error('Failed to enable notifications');
       }
       
     } catch (error: any) {
       console.error('❌ Error enabling notifications:', error);
       
-      // Reset state on error to prevent toggle from getting stuck
-      setPushSubscribed(false);
-      setPushEnabled(false);
+      // Reset state on error
+      setNotificationEnabled(false);
       
       let errorMessage = error.message || "Failed to enable notifications";
       
@@ -278,25 +180,17 @@ export function NotificationDialog({
     }
   };
 
-  // Unsubscribe from push notifications
-  const handlePushUnsubscribe = async () => {
+  // Disable notifications (simple approach)
+  const handleNotificationDisable = async () => {
     try {
-      // Try push notifications first (proper database unsubscription)
-      try {
-        await pushNotificationService.unsubscribe();
-        console.log('✅ Push notifications unsubscribed successfully');
-      } catch (pushError: any) {
-        console.log('🔔 Push notifications not available, disabling simple notifications:', pushError.message);
-      }
-
-      // Disable simple notifications
-      simpleNotificationService.disable();
-      setPushSubscribed(false);
-      setPushEnabled(false);
+      await simpleNotificationService.disable();
+      setNotificationEnabled(false);
+      setNotificationPermission(simpleNotificationService.currentPermission);
       toast({
         title: "Success",
         description: "Notifications disabled successfully",
       });
+      console.log('✅ Notifications disabled successfully');
     } catch (error: any) {
       console.error('Error disabling notifications:', error);
       toast({
@@ -307,13 +201,13 @@ export function NotificationDialog({
     }
   };
 
-  // Test push notification
+  // Test notification
   const handleTestNotification = async () => {
     try {
       console.log('🧪 Sending test notification...');
       
       // Check if notifications are enabled
-      if (!pushSubscribed && !pushEnabled) {
+      if (!notificationEnabled) {
         throw new Error('Notifications are not enabled. Please enable notifications first.');
       }
 
@@ -322,20 +216,7 @@ export function NotificationDialog({
         throw new Error('Notification permission is not granted. Please enable notifications first.');
       }
 
-      // Try push notifications first (if available)
-      try {
-        await pushNotificationService.showTestNotification();
-        toast({
-          title: "Success",
-          description: "Test push notification sent successfully!",
-        });
-        console.log('✅ Test push notification sent successfully');
-        return;
-      } catch (pushError: any) {
-        console.log('🔔 Push notifications not available, using simple notifications:', pushError.message);
-      }
-
-      // Fallback to simple notifications (works without VAPID keys)
+      // Send test notification
       await simpleNotificationService.showTestNotification();
       toast({
         title: "Success",
@@ -439,18 +320,43 @@ export function NotificationDialog({
     }
   };
 
+  // Load notification status
+  const loadNotificationStatus = useCallback(async () => {
+    try {
+      console.log('🔔 Loading notification status...');
+      
+      // Get status from simple notification service
+      const status = simpleNotificationService.getStatus();
+      
+      setNotificationSupported(status.supported);
+      setNotificationEnabled(status.enabled);
+      setNotificationPermission(status.permission);
+      
+      console.log('🔔 Notification status:', {
+        supported: status.supported,
+        enabled: status.enabled,
+        permission: status.permission,
+        canShow: status.canShow
+      });
+    } catch (error) {
+      console.error('❌ Error loading notification status:', error);
+      setNotificationEnabled(false);
+      setNotificationSupported(false);
+      setNotificationPermission('denied');
+    }
+  }, []);
+
   // Load data on mount and when filters change
   useEffect(() => {
     if (isOpen) {
       fetchNotifications();
-      loadPushStatus();
+      loadNotificationStatus();
     } else {
       // Reset state when dialog is closed to prevent stale state
-      setPushEnabled(false);
-      setPushSubscribed(false);
-      setPushPermission('default');
+      setNotificationEnabled(false);
+      setNotificationPermission('default');
     }
-  }, [isOpen, fetchNotifications, loadPushStatus]);
+  }, [isOpen, fetchNotifications, loadNotificationStatus]);
 
   // Reset page when filters change
   useEffect(() => {
@@ -459,7 +365,7 @@ export function NotificationDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl max-h-[95vh] w-[95vw] sm:w-full p-0 flex flex-col">
+      <DialogContent className="max-w-4xl max-h-[98vh] w-[98vw] sm:w-full p-0 flex flex-col [&>button]:hidden">
         <DialogHeader className="px-6 py-4 border-b">
           <div className="flex items-center justify-between">
             <DialogTitle className="flex items-center gap-2">
@@ -476,6 +382,7 @@ export function NotificationDialog({
                 variant="ghost"
                 size="sm"
                 onClick={() => setShowSettings(true)}
+                className="h-8 w-8 p-0"
               >
                 <Settings className="w-4 h-4" />
               </Button>
@@ -483,6 +390,7 @@ export function NotificationDialog({
                 variant="ghost"
                 size="sm"
                 onClick={() => setShowFilters(!showFilters)}
+                className="h-8 w-8 p-0"
               >
                 <Filter className="w-4 h-4" />
               </Button>
@@ -491,8 +399,17 @@ export function NotificationDialog({
                 size="sm"
                 onClick={fetchNotifications}
                 disabled={loading}
+                className="h-8 w-8 p-0"
               >
                 <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onClose}
+                className="h-8 w-8 p-0"
+              >
+                <X className="w-4 h-4" />
               </Button>
             </div>
           </div>
@@ -501,7 +418,7 @@ export function NotificationDialog({
         <div className="flex-1 overflow-hidden">
           {showSettings ? (
             /* Real-time Notification Settings View */
-            <div className="h-full px-3 sm:px-6 pb-6 overflow-y-auto">
+            <div className="h-full px-3 sm:px-6 pb-6 overflow-y-auto min-h-[500px]">
               <div className="mb-4">
                 <Button
                   variant="ghost"
@@ -517,12 +434,12 @@ export function NotificationDialog({
                 <Card>
                   <CardHeader className="pb-3">
                     <CardTitle className="flex items-center gap-2 text-base">
-                      {pushSupported ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+                      {notificationSupported ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
                       Real-time Notifications
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    {!pushSupported ? (
+                    {!notificationSupported ? (
                       <div className="text-center py-6">
                         <VolumeX className="w-10 h-10 mx-auto text-gray-400 mb-3" />
                         <p className="text-sm text-gray-600">Real-time notifications are not supported in this browser</p>
@@ -537,12 +454,12 @@ export function NotificationDialog({
                             </p>
                           </div>
                           <Switch
-                            checked={pushSubscribed}
+                            checked={notificationEnabled}
                             onCheckedChange={(checked) => {
                               if (checked) {
-                                handlePushSubscribe();
+                                handleNotificationEnable();
                               } else {
-                                handlePushUnsubscribe();
+                                handleNotificationDisable();
                               }
                             }}
                           />
@@ -553,23 +470,23 @@ export function NotificationDialog({
                         <div className="space-y-2">
                           <div className="flex items-center justify-between">
                             <span className="text-xs">Permission Status:</span>
-                            <Badge variant={pushPermission === 'granted' ? 'default' : 'secondary'} className="text-xs">
-                              {pushPermission}
+                            <Badge variant={notificationPermission === 'granted' ? 'default' : 'secondary'} className="text-xs">
+                              {notificationPermission}
                             </Badge>
                           </div>
                           <div className="flex items-center justify-between">
                             <span className="text-xs">Notification Status:</span>
-                            <Badge variant={pushSubscribed ? 'default' : 'secondary'} className="text-xs">
-                              {pushSubscribed ? 'Enabled' : 'Disabled'}
+                            <Badge variant={notificationEnabled ? 'default' : 'secondary'} className="text-xs">
+                              {notificationEnabled ? 'Enabled' : 'Disabled'}
                             </Badge>
                           </div>
                         </div>
 
                         <div className="bg-gray-50 p-2 rounded text-xs text-gray-600">
-                          <strong>Note:</strong> Notifications will appear in your browser. For mobile push notifications, VAPID keys need to be configured on the server.
+                          <strong>Note:</strong> Notifications will appear in your browser when new vendor errors occur.
                         </div>
 
-                        {pushSubscribed && (
+                        {notificationEnabled && (
                           <>
                             <Separator />
                             <Button
@@ -592,38 +509,41 @@ export function NotificationDialog({
             <div className="h-full px-3 pb-4">
               {/* Filters */}
               {showFilters && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-4 p-3 bg-gray-50 rounded-lg">
-                  <div>
-                    <label className="text-sm font-medium mb-1 block">Status</label>
-                    <Select value={filters.status} onValueChange={(value) => setFilters({...filters, status: value})}>
-                      <SelectTrigger className="h-9">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All Status</SelectItem>
-                        <SelectItem value="pending">Pending</SelectItem>
-                        <SelectItem value="in_progress">In Progress</SelectItem>
-                        <SelectItem value="resolved">Resolved</SelectItem>
-                        <SelectItem value="dismissed">Dismissed</SelectItem>
-                      </SelectContent>
-                    </Select>
+                <div className="space-y-3 mb-4 p-3 bg-gray-50 rounded-lg">
+                  {/* Status and Severity in same row for mobile */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-sm font-medium mb-1 block">Status</label>
+                      <Select value={filters.status} onValueChange={(value) => setFilters({...filters, status: value})}>
+                        <SelectTrigger className="h-9">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Status</SelectItem>
+                          <SelectItem value="pending">Pending</SelectItem>
+                          <SelectItem value="in_progress">In Progress</SelectItem>
+                          <SelectItem value="resolved">Resolved</SelectItem>
+                          <SelectItem value="dismissed">Dismissed</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium mb-1 block">Severity</label>
+                      <Select value={filters.severity} onValueChange={(value) => setFilters({...filters, severity: value})}>
+                        <SelectTrigger className="h-9">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Severity</SelectItem>
+                          <SelectItem value="critical">Critical</SelectItem>
+                          <SelectItem value="high">High</SelectItem>
+                          <SelectItem value="medium">Medium</SelectItem>
+                          <SelectItem value="low">Low</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
                   <div>
-                    <label className="text-sm font-medium mb-1 block">Severity</label>
-                    <Select value={filters.severity} onValueChange={(value) => setFilters({...filters, severity: value})}>
-                      <SelectTrigger className="h-9">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All Severity</SelectItem>
-                        <SelectItem value="critical">Critical</SelectItem>
-                        <SelectItem value="high">High</SelectItem>
-                        <SelectItem value="medium">Medium</SelectItem>
-                        <SelectItem value="low">Low</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="sm:col-span-2 lg:col-span-1">
                     <label className="text-sm font-medium mb-1 block">Search</label>
                     <Input
                       placeholder="Search notifications..."
@@ -632,7 +552,7 @@ export function NotificationDialog({
                       className="h-9"
                     />
                   </div>
-                  <div className="sm:col-span-2 lg:col-span-1 flex items-end">
+                  <div className="flex items-end">
                     <Button 
                       variant="outline" 
                       onClick={() => setFilters({ status: 'all', type: 'all', severity: 'all', search: '' })}
@@ -645,7 +565,7 @@ export function NotificationDialog({
               )}
 
               {/* Notifications List */}
-              <ScrollArea className="h-[300px] sm:h-[400px] md:h-[500px]">
+              <ScrollArea className="h-[400px] sm:h-[500px] md:h-[600px] lg:h-[650px]">
                 {loading ? (
                   <div className="flex items-center justify-center h-32">
                     <RefreshCw className="w-6 h-6 animate-spin" />
@@ -763,7 +683,7 @@ export function NotificationDialog({
         {/* Notification Detail Modal - Mobile Friendly */}
         {selectedNotification && (
           <Dialog open={!!selectedNotification} onOpenChange={() => setSelectedNotification(null)}>
-            <DialogContent className="w-[95vw] max-w-sm max-h-[95vh] p-0 overflow-hidden flex flex-col [&>button]:hidden">
+            <DialogContent className="w-[98vw] max-w-md max-h-[98vh] p-0 overflow-hidden flex flex-col [&>button]:hidden">
               <DialogHeader className="px-3 py-2 border-b flex-shrink-0">
                 <div className="flex items-center justify-between">
                   <DialogTitle className="flex items-center gap-1 text-xs font-medium pr-1 flex-1 min-w-0">
@@ -783,7 +703,7 @@ export function NotificationDialog({
                 </div>
               </DialogHeader>
               
-              <div className="px-3 py-2 space-y-2 flex-1 overflow-y-auto">
+              <div className="px-3 py-2 space-y-3 flex-1 overflow-y-auto min-h-[400px]">
                 <div>
                   <h4 className="font-medium mb-1 text-xs">Description</h4>
                   <p className="text-xs text-gray-600 leading-relaxed break-words">{selectedNotification.message}</p>
@@ -819,7 +739,7 @@ export function NotificationDialog({
                 {selectedNotification.error_details && (
                   <div>
                     <h4 className="font-medium mb-1 text-xs">Error Details</h4>
-                    <div className="bg-gray-100 p-2 rounded text-xs overflow-auto max-h-16">
+                    <div className="bg-gray-100 p-2 rounded text-xs overflow-auto max-h-24">
                       <div className="whitespace-pre-wrap break-words text-xs leading-relaxed">
                         {selectedNotification.error_details}
                       </div>
@@ -830,7 +750,7 @@ export function NotificationDialog({
                 {selectedNotification.metadata && (
                   <div>
                     <h4 className="font-medium mb-1 text-xs">Additional Information</h4>
-                    <div className="bg-gray-100 p-2 rounded text-xs overflow-auto max-h-16">
+                    <div className="bg-gray-100 p-2 rounded text-xs overflow-auto max-h-24">
                       <div className="whitespace-pre-wrap break-words text-xs leading-relaxed">
                         {JSON.stringify(selectedNotification.metadata, null, 2)}
                       </div>
@@ -842,7 +762,7 @@ export function NotificationDialog({
                   <h4 className="font-medium mb-1 text-xs">Resolution Notes</h4>
                   <textarea
                     className="w-full p-2 border rounded text-xs resize-none focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    rows={3}
+                    rows={4}
                     placeholder="Add resolution notes..."
                     value={resolutionNotes}
                     onChange={(e) => setResolutionNotes(e.target.value)}
