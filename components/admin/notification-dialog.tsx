@@ -146,21 +146,50 @@ export function NotificationDialog({
       setPushPermission(status.permission);
       setPushSubscribed(status.isSubscribed);
       
-      try {
-        const response = await apiClient.getPushNotificationStatus();
-        if (response.success) {
-          setPushEnabled(response.data.isSubscribed);
-        }
-      } catch (apiError: any) {
-        // Check if it's an authentication error
-        if (apiError.message.includes('Authorization header is required') || 
-            apiError.message.includes('User not authenticated') ||
-            apiError.message.includes('401')) {
-          console.log('User not authenticated for push notifications, using defaults');
+      // Check browser notification permission first
+      if (status.isSupported) {
+        const browserPermission = Notification.permission;
+        setPushPermission(browserPermission);
+        
+        // If browser permission is granted, check if we have a subscription
+        if (browserPermission === 'granted') {
+          try {
+            const response = await apiClient.getPushNotificationStatus();
+            if (response.success) {
+              setPushEnabled(response.data.isSubscribed);
+              setPushSubscribed(response.data.isSubscribed);
+            } else {
+              // If API fails but browser permission is granted, enable simple notifications
+              setPushEnabled(true);
+              setPushSubscribed(true);
+            }
+          } catch (apiError: any) {
+            // Check if it's an authentication error
+            if (apiError.message.includes('Authorization header is required') || 
+                apiError.message.includes('User not authenticated') ||
+                apiError.message.includes('401')) {
+              console.log('User not authenticated for push notifications, using browser permission');
+              // If browser permission is granted, enable simple notifications
+              if (browserPermission === 'granted') {
+                setPushEnabled(true);
+                setPushSubscribed(true);
+              }
+            } else {
+              console.log('Push notification status not available:', apiError.message);
+              // If browser permission is granted, enable simple notifications
+              if (browserPermission === 'granted') {
+                setPushEnabled(true);
+                setPushSubscribed(true);
+              }
+            }
+          }
         } else {
-          console.log('Push notification status not available:', apiError.message);
+          // Browser permission not granted
+          setPushEnabled(false);
+          setPushSubscribed(false);
         }
-        // Set default values if API call fails
+      } else {
+        // Notifications not supported
         setPushEnabled(false);
         setPushSubscribed(false);
       }
@@ -179,21 +208,40 @@ export function NotificationDialog({
         throw new Error('This browser does not support notifications');
       }
 
-      // Try simple notifications first (works without VAPID keys)
-      console.log('🔔 Requesting browser notification permission...');
-      const enabled = await simpleNotificationService.enable();
-      
-      if (enabled) {
-        setPushSubscribed(true);
-        setPushEnabled(true);
-        toast({
-          title: "Success",
-          description: "Browser notifications enabled successfully",
-        });
-        console.log('✅ Browser notifications enabled successfully');
-        return;
-      } else {
-        throw new Error('Notification permission denied by user');
+      // Try push notifications first (proper database subscription)
+      try {
+        console.log('🔔 Attempting to subscribe to push notifications...');
+        const success = await pushNotificationService.subscribe();
+        
+        if (success) {
+          setPushSubscribed(true);
+          setPushEnabled(true);
+          toast({
+            title: "Success",
+            description: "Push notifications enabled successfully",
+          });
+          console.log('✅ Push notifications enabled successfully');
+          return;
+        }
+      } catch (pushError: any) {
+        console.log('🔔 Push notifications failed, falling back to simple notifications:', pushError.message);
+        
+        // Fallback to simple notifications (works without VAPID keys)
+        console.log('🔔 Requesting browser notification permission...');
+        const enabled = await simpleNotificationService.enable();
+        
+        if (enabled) {
+          setPushSubscribed(true);
+          setPushEnabled(true);
+          toast({
+            title: "Success",
+            description: "Browser notifications enabled successfully (Push notifications not available)",
+          });
+          console.log('✅ Browser notifications enabled successfully');
+          return;
+        } else {
+          throw new Error('Notification permission denied by user');
+        }
       }
       
     } catch (error: any) {
@@ -219,11 +267,12 @@ export function NotificationDialog({
   // Unsubscribe from push notifications
   const handlePushUnsubscribe = async () => {
     try {
-      // Try push notifications first
+      // Try push notifications first (proper database unsubscription)
       try {
         await pushNotificationService.unsubscribe();
-      } catch (pushError) {
-        console.log('Push notifications not available, disabling simple notifications');
+        console.log('✅ Push notifications unsubscribed successfully');
+      } catch (pushError: any) {
+        console.log('🔔 Push notifications not available, disabling simple notifications:', pushError.message);
       }
 
       // Disable simple notifications
@@ -250,11 +299,29 @@ export function NotificationDialog({
       console.log('🧪 Sending test notification...');
       
       // Check if notifications are enabled
-      if (!pushSubscribed) {
+      if (!pushSubscribed && !pushEnabled) {
         throw new Error('Notifications are not enabled. Please enable notifications first.');
       }
 
-      // Use simple notifications (works without VAPID keys)
+      // Check browser permission first
+      if (Notification.permission !== 'granted') {
+        throw new Error('Notification permission is not granted. Please enable notifications first.');
+      }
+
+      // Try push notifications first (if available)
+      try {
+        await pushNotificationService.showTestNotification();
+        toast({
+          title: "Success",
+          description: "Test push notification sent successfully!",
+        });
+        console.log('✅ Test push notification sent successfully');
+        return;
+      } catch (pushError: any) {
+        console.log('🔔 Push notifications not available, using simple notifications:', pushError.message);
+      }
+
+      // Fallback to simple notifications (works without VAPID keys)
       await simpleNotificationService.showTestNotification();
       toast({
         title: "Success",
