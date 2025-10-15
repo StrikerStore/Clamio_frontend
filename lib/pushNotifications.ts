@@ -117,35 +117,55 @@ class PushNotificationService {
    * Subscribe to push notifications
    */
   async subscribe(): Promise<boolean> {
+    console.log('🔔 [FRONTEND PUSH] Starting subscription process...');
+    console.log('🔔 [FRONTEND PUSH] Browser support:', this.isSupported);
+    console.log('🔔 [FRONTEND PUSH] VAPID key available:', !!this.vapidPublicKey);
+
     if (!this.isSupported) {
+      console.log('❌ [FRONTEND PUSH] Push notifications not supported');
       throw new Error('Push notifications are not supported in this browser');
     }
 
     if (!this.vapidPublicKey) {
-      console.log('🔔 VAPID key not available, enabling browser notifications only');
+      console.log('🔔 [FRONTEND PUSH] VAPID key not available, enabling browser notifications only');
       // Enable browser notifications without push subscription
       const permission = await this.requestPermission();
+      console.log('🔔 [FRONTEND PUSH] Browser permission result:', permission);
       if (permission === 'granted') {
         this.isSubscribed = true;
+        console.log('✅ [FRONTEND PUSH] Browser notifications enabled (no VAPID)');
         return true;
       }
       throw new Error('Notification permission denied');
     }
 
     try {
+      console.log('🔔 [FRONTEND PUSH] Requesting notification permission...');
       // Request permission first
       const permission = await this.requestPermission();
+      console.log('🔔 [FRONTEND PUSH] Permission result:', permission);
+      
       if (permission !== 'granted') {
         throw new Error('Notification permission denied');
       }
 
+      console.log('🔔 [FRONTEND PUSH] Getting service worker registration...');
       // Get service worker registration
       const registration = await navigator.serviceWorker.ready;
+      console.log('🔔 [FRONTEND PUSH] Service worker ready:', !!registration);
 
+      console.log('🔔 [FRONTEND PUSH] Subscribing to push manager...');
       // Subscribe to push manager
+      const applicationServerKey = this.urlBase64ToUint8Array(this.vapidPublicKey);
       const subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: this.urlBase64ToUint8Array(this.vapidPublicKey)
+        applicationServerKey: applicationServerKey as BufferSource
+      });
+
+      console.log('🔔 [FRONTEND PUSH] Push subscription created:', {
+        endpoint: subscription.endpoint,
+        hasP256dh: !!subscription.getKey('p256dh'),
+        hasAuth: !!subscription.getKey('auth')
       });
 
       this.subscription = subscription;
@@ -160,15 +180,24 @@ class PushNotificationService {
         }
       };
 
+      console.log('🔔 [FRONTEND PUSH] Sending subscription to backend...');
+      console.log('🔔 [FRONTEND PUSH] Subscription data:', {
+        endpoint: subscriptionData.endpoint,
+        p256dhLength: subscriptionData.keys.p256dh.length,
+        authLength: subscriptionData.keys.auth.length
+      });
+
       const response = await apiClient.subscribeToPushNotifications(subscriptionData);
+      console.log('🔔 [FRONTEND PUSH] Backend response:', response);
+
       if (!response.success) {
         throw new Error(response.message || 'Failed to subscribe');
       }
 
-      console.log('✅ Successfully subscribed to push notifications');
+      console.log('✅ [FRONTEND PUSH] Successfully subscribed to push notifications');
       return true;
     } catch (error) {
-      console.error('Error subscribing to push notifications:', error);
+      console.error('❌ [FRONTEND PUSH] Error subscribing to push notifications:', error);
       this.isSubscribed = false;
       this.subscription = null;
       throw error;
@@ -269,70 +298,33 @@ class PushNotificationService {
   }
 
   /**
-   * Handle incoming push notification
+   * Handle incoming push notification (simplified for browser compatibility)
    */
-  handlePushNotification(event: PushEvent): void {
-    console.log('📱 Push notification received:', event);
-
-    if (!event.data) return;
+  handlePushNotification(data: any): void {
+    console.log('📱 Push notification received:', data);
 
     try {
-      const data = event.data.json() as any;
-      const notificationData: NotificationData = data.data;
-
       const options: NotificationOptions = {
-        body: data.body,
+        body: data.body || 'New notification',
         icon: data.icon || '/icon-192x192.png',
-        badge: data.badge || '/icon-72x72.png',
-        tag: `notification-${notificationData.notificationId}`,
-        data: notificationData,
-        requireInteraction: data.requireInteraction || false,
-        vibrate: data.vibrate || [200],
-        actions: data.actions || []
+        tag: `notification-${Date.now()}`,
+        data: data,
+        requireInteraction: false
       };
 
       // Show notification
-      const notification = new Notification(data.title, options);
+      const notification = new Notification(data.title || 'Clamio Notification', options);
 
       // Handle notification click
       notification.onclick = () => {
-        event.waitUntil(
-          clients.matchAll({ type: 'window' }).then(clientList => {
-            // If app is already open, focus it
-            for (const client of clientList) {
-              if (client.url === window.location.origin && 'focus' in client) {
-                return (client as any).focus();
-              }
-            }
-            // Otherwise, open new window
-            if (clients.openWindow) {
-              const url = notificationData.url || '/admin/orders';
-              return clients.openWindow(url);
-            }
-          })
-        );
+        window.focus();
         notification.close();
       };
 
-      // Handle notification action clicks
-      notification.onclick = (event) => {
-        if (event.action === 'view') {
-          // Open notification details
-          const url = notificationData.url || '/admin/orders';
-          if (clients.openWindow) {
-            clients.openWindow(url);
-          }
-        } else if (event.action === 'dismiss') {
-          // Dismiss notification
-          notification.close();
-        } else {
-          // Default click behavior
-          notification.onclick = () => {
-            window.focus();
-            notification.close();
-          };
-        }
-      };
+      // Auto-close after 5 seconds
+      setTimeout(() => {
+        notification.close();
+      }, 5000);
 
     } catch (error) {
       console.error('Error handling push notification:', error);

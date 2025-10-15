@@ -459,7 +459,7 @@ export function NotificationDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl max-h-[90vh] w-[95vw] sm:w-full p-0">
+      <DialogContent className="max-w-4xl max-h-[95vh] w-[95vw] sm:w-full p-0 flex flex-col">
         <DialogHeader className="px-6 py-4 border-b">
           <div className="flex items-center justify-between">
             <DialogTitle className="flex items-center gap-2">
@@ -500,8 +500,8 @@ export function NotificationDialog({
 
         <div className="flex-1 overflow-hidden">
           {showSettings ? (
-            /* Push Settings View */
-            <div className="h-full px-6 pb-6">
+            /* Real-time Notification Settings View */
+            <div className="h-full px-3 sm:px-6 pb-6 overflow-y-auto">
               <div className="mb-4">
                 <Button
                   variant="ghost"
@@ -513,34 +513,26 @@ export function NotificationDialog({
                   Back to Notifications
                 </Button>
               </div>
-              <div className="space-y-6">
+              <div className="space-y-4">
                 <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      {pushSupported ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
-                      Push Notifications
+                  <CardHeader className="pb-3">
+                    <CardTitle className="flex items-center gap-2 text-base">
+                      {pushSupported ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+                      Real-time Notifications
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-4">
                     {!pushSupported ? (
-                      <div className="text-center py-8">
-                        <VolumeX className="w-12 h-12 mx-auto text-gray-400 mb-4" />
-                        <p className="text-gray-600">Push notifications are not supported in this browser</p>
+                      <div className="text-center py-6">
+                        <VolumeX className="w-10 h-10 mx-auto text-gray-400 mb-3" />
+                        <p className="text-sm text-gray-600">Real-time notifications are not supported in this browser</p>
                       </div>
                     ) : (
                       <>
-                        <div className="text-center py-4 bg-blue-50 rounded-lg mb-4">
-                          <Bell className="w-8 h-8 mx-auto text-blue-600 mb-2" />
-                          <h4 className="font-medium text-blue-900">Real-time Notifications</h4>
-                          <p className="text-sm text-blue-700 mt-1">
-                            Get instant alerts for vendor errors and critical issues
-                          </p>
-                        </div>
-
                         <div className="flex items-center justify-between">
-                          <div>
-                            <h4 className="font-medium">Enable Browser Notifications</h4>
-                            <p className="text-sm text-gray-600">
+                          <div className="flex-1 min-w-0">
+                            <h4 className="font-medium text-sm">Enable Notifications</h4>
+                            <p className="text-xs text-gray-600 mt-1">
                               Show notifications when new issues occur
                             </p>
                           </div>
@@ -558,26 +550,23 @@ export function NotificationDialog({
 
                         <Separator />
 
-                        <div className="space-y-3">
+                        <div className="space-y-2">
                           <div className="flex items-center justify-between">
-                            <span className="text-sm">Permission Status:</span>
-                            <Badge variant={pushPermission === 'granted' ? 'default' : 'secondary'}>
+                            <span className="text-xs">Permission Status:</span>
+                            <Badge variant={pushPermission === 'granted' ? 'default' : 'secondary'} className="text-xs">
                               {pushPermission}
                             </Badge>
                           </div>
                           <div className="flex items-center justify-between">
-                            <span className="text-sm">Notification Status:</span>
-                            <Badge variant={pushSubscribed ? 'default' : 'secondary'}>
+                            <span className="text-xs">Notification Status:</span>
+                            <Badge variant={pushSubscribed ? 'default' : 'secondary'} className="text-xs">
                               {pushSubscribed ? 'Enabled' : 'Disabled'}
                             </Badge>
                           </div>
                         </div>
 
-                        <div className="bg-gray-50 p-3 rounded-lg">
-                          <p className="text-xs text-gray-600">
-                            <strong>Note:</strong> Notifications will appear in your browser and can be viewed in the notification panel above. 
-                            For push notifications on mobile devices, VAPID keys need to be configured on the server.
-                          </p>
+                        <div className="bg-gray-50 p-2 rounded text-xs text-gray-600">
+                          <strong>Note:</strong> Notifications will appear in your browser. For mobile push notifications, VAPID keys need to be configured on the server.
                         </div>
 
                         {pushSubscribed && (
@@ -586,7 +575,7 @@ export function NotificationDialog({
                             <Button
                               variant="outline"
                               onClick={handleTestNotification}
-                              className="w-full"
+                              className="w-full text-sm h-8"
                             >
                               Send Test Notification
                             </Button>
@@ -656,7 +645,7 @@ export function NotificationDialog({
               )}
 
               {/* Notifications List */}
-              <ScrollArea className="h-[400px] sm:h-[500px]">
+              <ScrollArea className="h-[300px] sm:h-[400px] md:h-[500px]">
                 {loading ? (
                   <div className="flex items-center justify-center h-32">
                     <RefreshCw className="w-6 h-6 animate-spin" />
