@@ -1014,6 +1014,51 @@ class ApiClient {
   async getNotificationStats(): Promise<ApiResponse> {
     return this.makeRequest('/notifications/stats')
   }
+
+  // ==================== PUSH NOTIFICATION METHODS ====================
+
+  /**
+   * Get VAPID public key
+   */
+  async getVapidKey(): Promise<ApiResponse> {
+    return this.makeRequest('/public/vapid-key')
+  }
+
+  /**
+   * Subscribe to push notifications
+   */
+  async subscribeToPushNotifications(subscription: any): Promise<ApiResponse> {
+    return this.makeRequest('/notifications/subscribe', {
+      method: 'POST',
+      body: JSON.stringify({ subscription })
+    })
+  }
+
+  /**
+   * Unsubscribe from push notifications
+   */
+  async unsubscribeFromPushNotifications(): Promise<ApiResponse> {
+    return this.makeRequest('/notifications/unsubscribe', {
+      method: 'POST'
+    })
+  }
+
+  /**
+   * Get push subscription status
+   */
+  async getPushNotificationStatus(): Promise<ApiResponse> {
+    return this.makeRequest('/notifications/push-status')
+  }
+
+  /**
+   * Update push notification preference
+   */
+  async updatePushNotificationPreference(enabled: boolean): Promise<ApiResponse> {
+    return this.makeRequest('/notifications/push-preference', {
+      method: 'PATCH',
+      body: JSON.stringify({ enabled })
+    })
+  }
 }
 
 // Export singleton instance

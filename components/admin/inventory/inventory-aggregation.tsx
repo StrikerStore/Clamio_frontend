@@ -38,7 +38,8 @@ export function InventoryAggregation() {
   const [typeFilters, setTypeFilters] = useState<string[]>([]); // e.g., ["player", "fan"]
   const [seasonFilters, setSeasonFilters] = useState<string[]>([]); // e.g., ["2024-25", "2025-26"]
   const [locationFilters, setLocationFilters] = useState<string[]>([]); // e.g., ["Warehouse A", "Warehouse B"]
-  const [searchFilter, setSearchFilter] = useState<string>(""); // text search
+  const [searchFilter, setSearchFilter] = useState<string>(""); // text search (includes)
+  const [searchExcludeFilter, setSearchExcludeFilter] = useState<string>(""); // text search (excludes)
   const [showFilters, setShowFilters] = useState(false);
 
   useEffect(() => {
@@ -191,17 +192,35 @@ export function InventoryAggregation() {
         if (!hasAnyLocation) return false;
       }
 
-      // Search filter (product name or SKU)
+      // Search filter (product name or SKU) - comma separated includes
       if (searchFilter.trim()) {
-        const searchLower = searchFilter.toLowerCase().trim();
-        const nameMatch = product.productName.toLowerCase().includes(searchLower);
-        const skuMatch = product.baseSku.toLowerCase().includes(searchLower);
-        if (!nameMatch && !skuMatch) return false;
+        const searchTerms = searchFilter.toLowerCase().split(',').map(term => term.trim()).filter(term => term);
+        const productNameLower = product.productName.toLowerCase();
+        const skuLower = product.baseSku.toLowerCase();
+        
+        // At least one search term must match
+        const hasMatch = searchTerms.some(term => 
+          productNameLower.includes(term) || skuLower.includes(term)
+        );
+        if (!hasMatch) return false;
+      }
+
+      // Search exclude filter (product name or SKU) - comma separated excludes
+      if (searchExcludeFilter.trim()) {
+        const excludeTerms = searchExcludeFilter.toLowerCase().split(',').map(term => term.trim()).filter(term => term);
+        const productNameLower = product.productName.toLowerCase();
+        const skuLower = product.baseSku.toLowerCase();
+        
+        // If any exclude term matches, exclude this product
+        const hasExcludeMatch = excludeTerms.some(term => 
+          productNameLower.includes(term) || skuLower.includes(term)
+        );
+        if (hasExcludeMatch) return false;
       }
 
       return true;
     });
-  }, [products, typeFilters, seasonFilters, locationFilters, searchFilter, rtoData]);
+  }, [products, typeFilters, seasonFilters, locationFilters, searchFilter, searchExcludeFilter, rtoData]);
 
   /**
    * Toggle type filter
@@ -238,12 +257,13 @@ export function InventoryAggregation() {
     setSeasonFilters([]);
     setLocationFilters([]);
     setSearchFilter("");
+    setSearchExcludeFilter("");
   };
 
   /**
    * Check if any filters are active
    */
-  const hasActiveFilters = typeFilters.length > 0 || seasonFilters.length > 0 || locationFilters.length > 0 || searchFilter.trim() !== "";
+  const hasActiveFilters = typeFilters.length > 0 || seasonFilters.length > 0 || locationFilters.length > 0 || searchFilter.trim() !== "" || searchExcludeFilter.trim() !== "";
 
   /**
    * Format size-quantity for bulk WhatsApp message
@@ -283,7 +303,8 @@ export function InventoryAggregation() {
       if (locationFilters.length > 0) {
         message += `- Location: ${locationFilters.join(", ")}\n`;
       }
-      if (searchFilter.trim()) message += `- Search: "${searchFilter}"\n`;
+      if (searchFilter.trim()) message += `- Include: "${searchFilter}"\n`;
+      if (searchExcludeFilter.trim()) message += `- Exclude: "${searchExcludeFilter}"\n`;
       message += `\n`;
     } else {
       message += `\n`;
@@ -550,12 +571,12 @@ export function InventoryAggregation() {
 
               {/* Search Filter */}
               <div className="space-y-1.5">
-                <Label htmlFor="search-filter" className="text-xs">Search</Label>
+                <Label htmlFor="search-filter" className="text-xs">Search (includes)</Label>
                 <div className="relative">
                   <Input
                     id="search-filter"
                     type="text"
-                    placeholder="Name or SKU..."
+                    placeholder="Name or SKU (comma separated)..."
                     value={searchFilter}
                     onChange={(e) => setSearchFilter(e.target.value)}
                     className="h-9 text-xs pr-8"
@@ -563,6 +584,29 @@ export function InventoryAggregation() {
                   {searchFilter && (
                     <button
                       onClick={() => setSearchFilter("")}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Search Exclude Filter */}
+              <div className="space-y-1.5">
+                <Label htmlFor="search-exclude-filter" className="text-xs">Search (exclude)</Label>
+                <div className="relative">
+                  <Input
+                    id="search-exclude-filter"
+                    type="text"
+                    placeholder="Name or SKU (comma separated)..."
+                    value={searchExcludeFilter}
+                    onChange={(e) => setSearchExcludeFilter(e.target.value)}
+                    className="h-9 text-xs pr-8"
+                  />
+                  {searchExcludeFilter && (
+                    <button
+                      onClick={() => setSearchExcludeFilter("")}
                       className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                     >
                       <X className="w-4 h-4" />
@@ -610,9 +654,20 @@ export function InventoryAggregation() {
                   ))}
                   {searchFilter.trim() && (
                     <Badge variant="secondary" className="text-xs">
-                      "{searchFilter}"
+                      Include: "{searchFilter}"
                       <button
                         onClick={() => setSearchFilter("")}
+                        className="ml-1 hover:text-gray-900"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </Badge>
+                  )}
+                  {searchExcludeFilter.trim() && (
+                    <Badge variant="secondary" className="text-xs">
+                      Exclude: "{searchExcludeFilter}"
+                      <button
+                        onClick={() => setSearchExcludeFilter("")}
                         className="ml-1 hover:text-gray-900"
                       >
                         <X className="w-3 h-3" />
@@ -753,12 +808,12 @@ export function InventoryAggregation() {
 
             {/* Search Filter */}
             <div className="space-y-2">
-              <Label htmlFor="search-filter-desktop" className="text-sm">Search</Label>
+              <Label htmlFor="search-filter-desktop" className="text-sm">Search (includes)</Label>
               <div className="relative">
                 <Input
                   id="search-filter-desktop"
                   type="text"
-                  placeholder="Name or SKU..."
+                  placeholder="Name or SKU (comma separated)..."
                   value={searchFilter}
                   onChange={(e) => setSearchFilter(e.target.value)}
                   className="h-10 text-sm pr-8"
@@ -766,6 +821,29 @@ export function InventoryAggregation() {
                 {searchFilter && (
                   <button
                     onClick={() => setSearchFilter("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Search Exclude Filter */}
+            <div className="space-y-2">
+              <Label htmlFor="search-exclude-filter-desktop" className="text-sm">Search (exclude)</Label>
+              <div className="relative">
+                <Input
+                  id="search-exclude-filter-desktop"
+                  type="text"
+                  placeholder="Keywords to exclude (comma separated)..."
+                  value={searchExcludeFilter}
+                  onChange={(e) => setSearchExcludeFilter(e.target.value)}
+                  className="h-10 text-sm pr-8"
+                />
+                {searchExcludeFilter && (
+                  <button
+                    onClick={() => setSearchExcludeFilter("")}
                     className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                   >
                     <X className="w-4 h-4" />
@@ -814,9 +892,20 @@ export function InventoryAggregation() {
               ))}
               {searchFilter.trim() && (
                 <Badge variant="secondary" className="text-sm">
-                  Search: &quot;{searchFilter}&quot;
+                  Include: &quot;{searchFilter}&quot;
                   <button
                     onClick={() => setSearchFilter("")}
+                    className="ml-1 hover:text-gray-900"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </Badge>
+              )}
+              {searchExcludeFilter.trim() && (
+                <Badge variant="secondary" className="text-sm">
+                  Exclude: &quot;{searchExcludeFilter}&quot;
+                  <button
+                    onClick={() => setSearchExcludeFilter("")}
                     className="ml-1 hover:text-gray-900"
                   >
                     <X className="w-3 h-3" />

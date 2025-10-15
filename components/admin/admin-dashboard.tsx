@@ -65,6 +65,7 @@ import { apiClient } from "@/lib/api"
 import { useEffect, useMemo } from "react"
 import { useDeviceType } from "@/hooks/use-mobile"
 import { InventoryAggregation } from "@/components/admin/inventory/inventory-aggregation"
+import { NotificationDialog } from "./notification-dialog"
 
 // Mock data for admin dashboard
 const mockVendors = [
@@ -274,6 +275,7 @@ export function AdminDashboard() {
   const [notificationStats, setNotificationStats] = useState<any>(null)
   const [selectedNotification, setSelectedNotification] = useState<any>(null)
   const [showNotificationDialog, setShowNotificationDialog] = useState(false)
+  const [showNotificationPanel, setShowNotificationPanel] = useState(false)
   const [resolutionNotes, setResolutionNotes] = useState("")
   const [notificationFilters, setNotificationFilters] = useState({ 
     status: "all", 
@@ -1270,7 +1272,7 @@ export function AdminDashboard() {
                 <Button 
                   variant="ghost" 
                   size="sm"
-                  onClick={() => setActiveTab('notifications')}
+                  onClick={() => setShowNotificationPanel(true)}
                   className="p-2 relative"
                 >
                   <Bell className="w-5 h-5" />
@@ -1304,7 +1306,7 @@ export function AdminDashboard() {
                   variant="ghost" 
                   size="sm"
                   onClick={() => {
-                    setActiveTab('notifications');
+                    setShowNotificationPanel(true);
                     setIsMobileMenuOpen(false);
                   }}
                   className="p-2 relative"
@@ -4255,6 +4257,17 @@ export function AdminDashboard() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Notification Dialog */}
+      <NotificationDialog
+        isOpen={showNotificationPanel}
+        onClose={() => setShowNotificationPanel(false)}
+        notificationStats={notificationStats}
+        onNotificationUpdate={() => {
+          fetchNotificationStats();
+          // Refresh other data if needed
+        }}
+      />
     </div>
   )
 }
