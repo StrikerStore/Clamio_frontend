@@ -317,6 +317,10 @@ export function AdminDashboard() {
   const [showBulkAssignModal, setShowBulkAssignModal] = useState(false)
   const [selectedBulkVendorId, setSelectedBulkVendorId] = useState<string>("")
   const [bulkAssignLoading, setBulkAssignLoading] = useState(false)
+  
+  // Individual assign/unassign loading states (similar to vendor claim/unclaim)
+  const [assignLoading, setAssignLoading] = useState<{[key: string]: boolean}>({})
+  const [unassignLoading, setUnassignLoading] = useState<{[key: string]: boolean}>({})
 
   // Derived selection state for bulk actions
   const selectedOrderObjects = orders.filter((o) => selectedOrders.includes(o.unique_id))
@@ -1086,8 +1090,11 @@ export function AdminDashboard() {
   };
 
   // Handle order assignment to vendor
-  const handleAssignOrder = async () => {
-    if (!selectedOrderForAssignment || !selectedVendorId) {
+  const handleAssignOrder = async (order?: any, vendorId?: string) => {
+    const orderToAssign = order || selectedOrderForAssignment;
+    const vendorToAssign = vendorId || selectedVendorId;
+    
+    if (!orderToAssign || !vendorToAssign) {
       toast({
         title: "Missing Information",
         description: "Please select a vendor",
@@ -1096,10 +1103,13 @@ export function AdminDashboard() {
       return;
     }
 
+    // Set loading state for this order
+    setAssignLoading(prev => ({ ...prev, [orderToAssign.unique_id]: true }));
+
     try {
       const response = await apiClient.assignOrderToVendor(
-        selectedOrderForAssignment.unique_id,
-        selectedVendorId
+        orderToAssign.unique_id,
+        vendorToAssign
       );
 
       if (response.success) {
@@ -1107,9 +1117,14 @@ export function AdminDashboard() {
           title: "Order Assigned",
           description: response.message,
         });
-        setShowAssignModal(false);
-        setSelectedOrderForAssignment(null);
-        setSelectedVendorId("");
+        
+        // Close modal if it was opened from modal
+        if (!order) {
+          setShowAssignModal(false);
+          setSelectedOrderForAssignment(null);
+          setSelectedVendorId("");
+        }
+        
         fetchOrders(); // Refresh orders list
       } else {
         toast({
@@ -1124,11 +1139,17 @@ export function AdminDashboard() {
         description: "Failed to assign order",
         variant: "destructive",
       });
+    } finally {
+      // Clear loading state
+      setAssignLoading(prev => ({ ...prev, [orderToAssign.unique_id]: false }));
     }
   };
 
   // Handle order unassignment
   const handleUnassignOrder = async (order: any) => {
+    // Set loading state for this order
+    setUnassignLoading(prev => ({ ...prev, [order.unique_id]: true }));
+
     try {
       const response = await apiClient.unassignOrder(order.unique_id);
 
@@ -1151,6 +1172,9 @@ export function AdminDashboard() {
         description: "Failed to unassign order",
         variant: "destructive",
       });
+    } finally {
+      // Clear loading state
+      setUnassignLoading(prev => ({ ...prev, [order.unique_id]: false }));
     }
   };
 
@@ -1913,8 +1937,16 @@ export function AdminDashboard() {
                                         e.stopPropagation();
                                         openAssignModal(order);
                                       }}
+                                      disabled={assignLoading[order.unique_id]}
                                     >
-                                      Assign
+                                      {assignLoading[order.unique_id] ? (
+                                        <>
+                                          <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-1"></div>
+                                          Assigning...
+                                        </>
+                                      ) : (
+                                        'Assign'
+                                      )}
                                 </Button>
                                   ) : (
                                     <Button 
@@ -1924,8 +1956,16 @@ export function AdminDashboard() {
                                         e.stopPropagation();
                                         handleUnassignOrder(order);
                                       }}
+                                      disabled={unassignLoading[order.unique_id]}
                                     >
-                                      Unassign
+                                      {unassignLoading[order.unique_id] ? (
+                                        <>
+                                          <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-1"></div>
+                                          Unassigning...
+                                        </>
+                                      ) : (
+                                        'Unassign'
+                                      )}
                                     </Button>
                                   )}
                               </div>
@@ -2043,6 +2083,51 @@ export function AdminDashboard() {
                                     : 'N/A'}
                                   </span>
                                 </div>
+                              </div>
+                              
+                              {/* Assign/Unassign Button Row - Full Width at Bottom */}
+                              <div className="mt-3 pt-2 border-t">
+                                {order.status === 'unclaimed' ? (
+                                  <Button 
+                                    size="sm" 
+                                    variant="default"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openAssignModal(order);
+                                    }}
+                                    disabled={assignLoading[order.unique_id]}
+                                    className="w-full text-xs h-8"
+                                  >
+                                    {assignLoading[order.unique_id] ? (
+                                      <>
+                                        <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-1"></div>
+                                        Assigning...
+                                      </>
+                                    ) : (
+                                      'Assign Order'
+                                    )}
+                                  </Button>
+                                ) : (
+                                  <Button 
+                                    size="sm" 
+                                    variant="destructive"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleUnassignOrder(order);
+                                    }}
+                                    disabled={unassignLoading[order.unique_id]}
+                                    className="w-full text-xs h-8 border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700"
+                                  >
+                                    {unassignLoading[order.unique_id] ? (
+                                      <>
+                                        <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-red-600 mr-1"></div>
+                                        Unassigning...
+                                      </>
+                                    ) : (
+                                      'Unassign Order'
+                                    )}
+                                  </Button>
+                                )}
                               </div>
                             </Card>
                           ))
@@ -4095,7 +4180,16 @@ export function AdminDashboard() {
                    } else {
                      await handleAssignOrder()
                    }
-                 }} disabled={!selectedVendorId}>Confirm</Button>
+                 }} disabled={!selectedVendorId || assignLoading[selectedOrderForAssignment?.unique_id] || unassignLoading[selectedOrderForAssignment?.unique_id]}>
+                   {assignLoading[selectedOrderForAssignment?.unique_id] || unassignLoading[selectedOrderForAssignment?.unique_id] ? (
+                     <>
+                       <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-1"></div>
+                       Processing...
+                     </>
+                   ) : (
+                     'Confirm'
+                   )}
+                 </Button>
                </div>
              </div>
            )}
