@@ -72,18 +72,35 @@ class SimpleNotificationService {
       silent: false
     };
 
-    const notif = new Notification(notification.title, options);
+    try {
+      // Try to use service worker registration first (for PWA)
+      if ('serviceWorker' in navigator) {
+        const registration = await navigator.serviceWorker.ready;
+        if (registration.showNotification) {
+          await registration.showNotification(notification.title, options);
+          console.log('✅ Notification shown via service worker');
+          return;
+        }
+      }
 
-    // Auto-close after 5 seconds
-    setTimeout(() => {
-      notif.close();
-    }, 5000);
+      // Fallback to direct Notification constructor (for regular web pages)
+      const notif = new Notification(notification.title, options);
+      console.log('✅ Notification shown via direct constructor');
 
-    // Handle click
-    notif.onclick = () => {
-      window.focus();
-      notif.close();
-    };
+      // Auto-close after 5 seconds
+      setTimeout(() => {
+        notif.close();
+      }, 5000);
+
+      // Handle click
+      notif.onclick = () => {
+        window.focus();
+        notif.close();
+      };
+    } catch (error) {
+      console.error('❌ Error showing notification:', error);
+      throw error;
+    }
   }
 
   /**
