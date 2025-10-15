@@ -141,60 +141,62 @@ export function NotificationDialog({
   // Load push notification status
   const loadPushStatus = useCallback(async () => {
     try {
-      const status = pushNotificationService.getStatus();
-      setPushSupported(status.isSupported);
-      setPushPermission(status.permission);
-      setPushSubscribed(status.isSubscribed);
+      console.log('🔔 Loading push notification status...');
       
-      // Check browser notification permission first
-      if (status.isSupported) {
-        const browserPermission = Notification.permission;
-        setPushPermission(browserPermission);
-        
-        // If browser permission is granted, check if we have a subscription
-        if (browserPermission === 'granted') {
-          try {
-            const response = await apiClient.getPushNotificationStatus();
-            if (response.success) {
-              setPushEnabled(response.data.isSubscribed);
-              setPushSubscribed(response.data.isSubscribed);
-            } else {
-              // If API fails but browser permission is granted, enable simple notifications
-              setPushEnabled(true);
-              setPushSubscribed(true);
-            }
-          } catch (apiError: any) {
-            // Check if it's an authentication error
-            if (apiError.message.includes('Authorization header is required') || 
-                apiError.message.includes('User not authenticated') ||
-                apiError.message.includes('401')) {
-              console.log('User not authenticated for push notifications, using browser permission');
-              // If browser permission is granted, enable simple notifications
-              if (browserPermission === 'granted') {
-                setPushEnabled(true);
-                setPushSubscribed(true);
-              }
-            } else {
-              console.log('Push notification status not available:', apiError.message);
-              // If browser permission is granted, enable simple notifications
-              if (browserPermission === 'granted') {
-                setPushEnabled(true);
-                setPushSubscribed(true);
-              }
-            }
-          }
-        } else {
-          // Browser permission not granted
-          setPushEnabled(false);
-          setPushSubscribed(false);
-        }
-      } else {
-        // Notifications not supported
+      // Check browser support first
+      const isSupported = 'Notification' in window;
+      setPushSupported(isSupported);
+      
+      if (!isSupported) {
+        console.log('🔔 Notifications not supported in this browser');
         setPushEnabled(false);
         setPushSubscribed(false);
+        setPushPermission('denied');
+        return;
       }
+      
+      // Get current browser permission
+      const browserPermission = Notification.permission;
+      setPushPermission(browserPermission);
+      console.log('🔔 Browser permission:', browserPermission);
+      
+      // Try to get subscription status from backend
+      let backendSubscribed = false;
+      try {
+        const response = await apiClient.getPushNotificationStatus();
+        if (response.success) {
+          backendSubscribed = response.data.isSubscribed;
+          console.log('🔔 Backend subscription status:', backendSubscribed);
+        }
+      } catch (apiError: any) {
+        console.log('🔔 Backend status not available:', apiError.message);
+        // Don't set backendSubscribed to false here - let browser permission take precedence
+      }
+      
+      // Determine final state based on browser permission
+      if (browserPermission === 'granted') {
+        // Browser permission is granted - notifications should be enabled
+        setPushEnabled(true);
+        setPushSubscribed(true);
+        console.log('🔔 Notifications enabled (browser permission granted)');
+      } else if (browserPermission === 'denied') {
+        // Browser permission is denied - notifications should be disabled
+        setPushEnabled(false);
+        setPushSubscribed(false);
+        console.log('🔔 Notifications disabled (browser permission denied)');
+      } else {
+        // Default state - permission not requested yet
+        setPushEnabled(false);
+        setPushSubscribed(false);
+        console.log('🔔 Notifications disabled (permission not requested)');
+      }
+      
     } catch (error) {
-      console.error('Error loading push status:', error);
+      console.error('❌ Error loading push status:', error);
+      // Set safe defaults on error
+      setPushEnabled(false);
+      setPushSubscribed(false);
+      setPushPermission('denied');
     }
   }, []);
 
@@ -206,6 +208,14 @@ export function NotificationDialog({
       // Check if browser supports notifications
       if (!('Notification' in window)) {
         throw new Error('This browser does not support notifications');
+      }
+
+      // Check current permission first
+      const currentPermission = Notification.permission;
+      console.log('🔔 Current permission:', currentPermission);
+      
+      if (currentPermission === 'denied') {
+        throw new Error('Notification permission was denied. Please enable notifications in your browser settings.');
       }
 
       // Try push notifications first (proper database subscription)
@@ -246,6 +256,10 @@ export function NotificationDialog({
       
     } catch (error: any) {
       console.error('❌ Error enabling notifications:', error);
+      
+      // Reset state on error to prevent toggle from getting stuck
+      setPushSubscribed(false);
+      setPushEnabled(false);
       
       let errorMessage = error.message || "Failed to enable notifications";
       
@@ -430,6 +444,11 @@ export function NotificationDialog({
     if (isOpen) {
       fetchNotifications();
       loadPushStatus();
+    } else {
+      // Reset state when dialog is closed to prevent stale state
+      setPushEnabled(false);
+      setPushSubscribed(false);
+      setPushPermission('default');
     }
   }, [isOpen, fetchNotifications, loadPushStatus]);
 
