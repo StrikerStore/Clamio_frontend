@@ -206,6 +206,9 @@ export function VendorDashboard() {
   const [groupedOrdersTotalCount, setGroupedOrdersTotalCount] = useState(0);
   const [groupedOrdersTotalQuantity, setGroupedOrdersTotalQuantity] = useState(0);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  // Store all grouped orders (all pages) for filtered count calculation
+  const [allGroupedOrders, setAllGroupedOrders] = useState<any[]>([]);
+  const [isLoadingAllOrders, setIsLoadingAllOrders] = useState(false);
 
   // Settlement-related state
   const [payments, setPayments] = useState<{ currentPayment: number; futurePayment: number } | null>(null)
@@ -366,6 +369,11 @@ export function VendorDashboard() {
           setGroupedOrdersTotalCount(groupedResponse.data.pagination.total);
         }
         
+        // Ensure My Orders card/tab counts reflect the latest absolute total
+        if (typeof groupedResponse.data.totalQuantity === 'number') {
+          setGroupedOrdersTotalQuantity(groupedResponse.data.totalQuantity);
+        }
+        
         console.log('✅ Grouped orders refreshed successfully');
       } else {
         console.log('⚠️ Failed to refresh grouped orders');
@@ -406,6 +414,41 @@ export function VendorDashboard() {
       setOrdersLoading(false);
     }
   }
+
+  // Fetch all grouped orders (all pages) for filtered count calculation
+  const fetchAllGroupedOrders = async () => {
+    setIsLoadingAllOrders(true);
+    try {
+      let allOrders: any[] = [];
+      let page = 1;
+      let hasMore = true;
+      
+      while (hasMore) {
+        const response = await apiClient.getGroupedOrders(page, 50);
+        
+        if (response.success && response.data && Array.isArray(response.data.groupedOrders)) {
+          allOrders = [...allOrders, ...response.data.groupedOrders];
+          
+          if (response.data.pagination) {
+            hasMore = response.data.pagination.hasMore;
+            page++;
+          } else {
+            hasMore = false;
+          }
+        } else {
+          hasMore = false;
+        }
+      }
+      
+      console.log('✅ Fetched all grouped orders:', allOrders.length);
+      setAllGroupedOrders(allOrders);
+    } catch (err: any) {
+      console.error('❌ Error fetching all grouped orders:', err);
+      setAllGroupedOrders([]);
+    } finally {
+      setIsLoadingAllOrders(false);
+    }
+  };
 
   const fetchGroupedOrders = async (resetPagination: boolean = true) => {
     if (resetPagination) {
@@ -467,6 +510,30 @@ export function VendorDashboard() {
     fetchOrders();
     fetchGroupedOrders();
   }, []);
+
+  // Fetch all orders when filters are applied on My Orders tab
+  useEffect(() => {
+    if (activeTab !== "my-orders") {
+      // Clear all orders when not on my-orders tab to save memory
+      setAllGroupedOrders([]);
+      return;
+    }
+
+    const tabFilter = tabFilters["my-orders"];
+    const hasSearchFilter = tabFilter.searchTerm.trim().length > 0;
+    const hasDateFilter = tabFilter.dateFrom || tabFilter.dateTo;
+    const hasLabelFilter = selectedLabelFilter !== 'all';
+    const hasFilters = hasSearchFilter || hasDateFilter || hasLabelFilter;
+
+    if (hasFilters && !isLoadingAllOrders && allGroupedOrders.length === 0) {
+      // Fetch all orders when filters are applied and we don't have them yet
+      console.log('🔍 Filters applied - fetching all grouped orders for filtered count');
+      fetchAllGroupedOrders();
+    } else if (!hasFilters && allGroupedOrders.length > 0) {
+      // Clear all orders when filters are removed to save memory
+      setAllGroupedOrders([]);
+    }
+  }, [activeTab, tabFilters["my-orders"].searchTerm, tabFilters["my-orders"].dateFrom, tabFilters["my-orders"].dateTo, selectedLabelFilter]);
 
   // Real-time polling for order updates
   useEffect(() => {
@@ -611,6 +678,54 @@ export function VendorDashboard() {
     }
   }
 
+  const downloadManifestSummary = async (manifestIds: string[]) => {
+    try {
+      const vendorToken = localStorage.getItem('vendorToken');
+      if (!vendorToken) {
+        console.error('No vendor token found');
+        return;
+      }
+
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+      const response = await fetch(`${API_BASE_URL}/orders/download-manifest-summary`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': vendorToken,
+        },
+        body: JSON.stringify({ manifest_ids: manifestIds }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to download manifest summary');
+      }
+
+      // Download PDF
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      const timestamp = new Date().toISOString().split('T')[0];
+      link.download = `manifest-summary-${timestamp}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+      toast({
+        title: "Manifest Downloaded",
+        description: "Manifest summary PDF has been downloaded successfully",
+      });
+    } catch (error) {
+      console.error('Error downloading manifest summary:', error);
+      toast({
+        title: "Download Failed",
+        description: "Failed to download manifest summary PDF",
+        variant: "destructive",
+      });
+    }
+  };
+
   const handleBulkMarkReady = async () => {
     if (selectedMyOrders.length === 0) {
       toast({
@@ -659,6 +774,12 @@ export function VendorDashboard() {
             variant: "destructive",
           });
           console.log('Failed orders:', data.data.failed_orders);
+        }
+        
+        // Auto-download manifest summary PDF
+        if (data.data.manifest_ids && data.data.manifest_ids.length > 0) {
+          console.log('📥 Auto-downloading manifest summary PDF...', data.data.manifest_ids);
+          await downloadManifestSummary(data.data.manifest_ids);
         }
         
         // Clear selection and refresh orders
@@ -765,6 +886,24 @@ export function VendorDashboard() {
         {displayNames[status as keyof typeof displayNames] || status.toUpperCase()}
       </Badge>
     )
+  }
+
+  // Maps shipment status to colored badge classes per UI requirement
+  const getShipmentBadgeClasses = (status?: string) => {
+    const s = (status || '').toLowerCase();
+    if (s === 'in transit' || s === 'in_transit' || s.includes('transit')) {
+      return 'text-orange-800 bg-orange-100 border border-orange-200';
+    }
+    if (s === 'out for delivery' || s === 'out_for_delivery') {
+      return 'text-yellow-800 bg-yellow-100 border border-yellow-200';
+    }
+    if (s === 'delivered') {
+      return 'text-green-800 bg-green-100 border border-green-200';
+    }
+    if (s === 'pickup failed' || s === 'failed pickup' || s === 'failed delivery') {
+      return 'text-red-800 bg-red-100 border border-red-200';
+    }
+    return 'text-blue-800 bg-blue-100 border border-blue-200';
   }
 
   const getPriorityBadge = (priority: string) => {
@@ -894,6 +1033,7 @@ export function VendorDashboard() {
               current_shipment_status: order.current_shipment_status,
               is_handover: order.is_handover,
               is_manifest: order.is_manifest,
+              manifest_id: order.manifest_id,
               total_quantity: 0,
               products: []
             };
@@ -946,9 +1086,21 @@ export function VendorDashboard() {
       const term = tabFilter.searchTerm.toLowerCase();
       baseOrders = baseOrders.filter(order => {
         const orderId = String(order.order_id || order.id || '').toLowerCase();
+        const customer = String(order.customer_name || order.customer || '').toLowerCase();
+        
+        // For grouped orders (handover tab), search through products array
+        if (Array.isArray(order.products) && order.products.length > 0) {
+          const productMatch = order.products.some((product: any) => {
+            const name = String(product.product_name || '').toLowerCase();
+            const sku = String(product.product_code || product.sku || '').toLowerCase();
+            return name.includes(term) || sku.includes(term);
+          });
+          return orderId.includes(term) || customer.includes(term) || productMatch;
+        }
+        
+        // For individual orders (all-orders tab), search direct fields
         const productName = String(order.product_name || order.product || '').toLowerCase();
         const sku = String(order.product_code || order.sku || '').toLowerCase();
-        const customer = String(order.customer_name || order.customer || '').toLowerCase();
         return (
           orderId.includes(term) ||
           productName.includes(term) ||
@@ -1005,7 +1157,9 @@ export function VendorDashboard() {
     }
     
     // Ensure unique orders before returning
-    return ensureUniqueOrders(baseOrders, 'unique_id');
+    // Use 'order_id' for handover tab (grouped orders) and 'unique_id' for all-orders tab (individual orders)
+    const deduplicationKey = tab === "handover" ? 'order_id' : 'unique_id';
+    return ensureUniqueOrders(baseOrders, deduplicationKey);
   }
 
   // Get unique status values from orders data
@@ -1019,9 +1173,9 @@ export function VendorDashboard() {
     return Array.from(uniqueStatuses).sort();
   }
 
-  // Filter grouped orders for My Orders tab
-  const getFilteredGroupedOrdersForTab = (tab: string) => {
-    let baseOrders = groupedOrders;
+  // Filter grouped orders for My Orders tab (with option to use all orders)
+  const getFilteredGroupedOrdersForTab = (tab: string, useAllOrders: boolean = false) => {
+    let baseOrders = useAllOrders && allGroupedOrders.length > 0 ? allGroupedOrders : groupedOrders;
     const tabFilter = tabFilters[tab as keyof typeof tabFilters];
     
     // Apply label download filter for my orders tab
@@ -1163,6 +1317,18 @@ export function VendorDashboard() {
   const handleViewRequest = (settlement: any) => {
     setSelectedSettlementForView(settlement);
     setShowViewRequestDialog(true);
+  };
+
+  // Helper function to check if unclaim should be disabled
+  const isUnclaimDisabled = (order: any): boolean => {
+    // Disable if order is handed over (is_handover = 1)
+    const isHandedOver = order.is_handover === 1 || order.is_handover === '1' || order.is_handover === true;
+    
+    // Disable if status is "Out for Pickup"
+    const isOutForPickup = order.current_shipment_status && 
+      String(order.current_shipment_status).toLowerCase() === 'out for pickup';
+    
+    return isHandedOver || isOutForPickup;
   };
 
   const handleRequestReverse = async (orderId: string, uniqueIds?: string[]) => {
@@ -1716,50 +1882,46 @@ export function VendorDashboard() {
   // Helper functions to calculate quantity sums for each tab (WITH filters - for tab content)
   const getQuantitySumForTab = (tabName: string) => {
     if (tabName === "my-orders") {
-      // For My Orders tab, use the filtered results (applies search, date, label filters)
-      const filteredOrders = getFilteredGroupedOrdersForTab(tabName);
-      console.log('🔢 TAB COUNT: Using filtered orders for tab count');
-      console.log('🔢 TAB COUNT: filteredOrders.length:', filteredOrders.length);
-      console.log('🔢 TAB COUNT: groupedOrders.length (unfiltered):', groupedOrders.length);
+      const tabFilter = tabFilters[tabName as keyof typeof tabFilters];
+      
+      // Check if any filters are applied
+      const hasSearchFilter = tabFilter.searchTerm.trim().length > 0;
+      const hasDateFilter = tabFilter.dateFrom || tabFilter.dateTo;
+      const hasLabelFilter = selectedLabelFilter !== 'all';
+      const hasFilters = hasSearchFilter || hasDateFilter || hasLabelFilter;
+      
+      if (!hasFilters) {
+        // No filters applied - use absolute total from API (all pages)
+        console.log('🔢 TAB COUNT: No filters - using absolute total from API');
+        return groupedOrdersTotalQuantity;
+      } else {
+        // Filters applied - use all orders if available, otherwise use loaded pages
+        const useAllOrders = allGroupedOrders.length > 0;
+        const filteredOrders = getFilteredGroupedOrdersForTab(tabName, useAllOrders);
+        console.log('🔢 TAB COUNT: Filters applied - calculating from filtered orders');
+        console.log('🔢 TAB COUNT: Using all orders:', useAllOrders);
+        console.log('🔢 TAB COUNT: filteredOrders.length:', filteredOrders.length);
+        console.log('🔢 TAB COUNT: allGroupedOrders.length:', allGroupedOrders.length);
+        console.log('🔢 TAB COUNT: groupedOrders.length:', groupedOrders.length);
+        
+        // Calculate total quantity from filtered orders
+        const filteredTotal = filteredOrders.reduce((sum, order) => {
+          return sum + (order.total_quantity || 0);
+        }, 0);
+        
+        console.log('🔢 TAB COUNT: Filtered total quantity:', filteredTotal);
+        return filteredTotal;
+      }
+    } else if (tabName === "handover") {
+      // For Handover tab, use filtered results (applies search, date, status filters)
+      const filteredOrders = getFilteredOrdersForTab(tabName);
       
       // Calculate total quantity from filtered orders
       const filteredTotal = filteredOrders.reduce((sum, order) => {
         return sum + (order.total_quantity || 0);
       }, 0);
       
-      console.log('🔢 TAB COUNT: Filtered total quantity:', filteredTotal);
       return filteredTotal;
-    } else if (tabName === "handover") {
-      // For Handover, use the same grouping logic as the tab content
-      const currentVendorId = user?.warehouseId;
-      let handoverOrders = orders.filter(order => 
-        order.claims_status === 'ready_for_handover' && 
-        order.claimed_by === currentVendorId &&
-        order.is_manifest === 1
-      );
-      
-      // Apply status filter if any statuses are selected (same logic as getFilteredOrdersForTab)
-      if (selectedStatuses.length > 0) {
-        handoverOrders = handoverOrders.filter(order => 
-          selectedStatuses.includes(order.status)
-        );
-      }
-      
-      // Group orders by order_id for handover tab (same logic as getFilteredOrdersForTab)
-      const handoverGrouped = handoverOrders.reduce((acc: any, order) => {
-        const orderId = order.order_id;
-        if (!acc[orderId]) {
-          acc[orderId] = {
-            total_quantity: 0
-          };
-        }
-        acc[orderId].total_quantity += order.quantity || 0;
-        return acc;
-      }, {});
-      
-      return Object.values(handoverGrouped).reduce((sum: number, order: any) => {
-        return sum + (order.total_quantity || 0);
-      }, 0);
     } else {
       // For All Orders tab, show filtered results (applies search, date filters)
       const filteredOrders = getFilteredOrdersForTab(tabName);
@@ -2583,9 +2745,9 @@ export function VendorDashboard() {
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <h4 className="font-medium text-sm sm:text-base truncate">{order.order_id}</h4>
-                                    {order.status && (
-                                      <div className="text-xs font-medium text-blue-800 px-2 py-1 bg-blue-100 rounded-full border border-blue-200">
-                                        {order.status}
+                                    {(order.current_shipment_status || order.status) && (
+                                      <div className={`text-xs font-medium px-2 py-1 rounded-full ${getShipmentBadgeClasses(order.current_shipment_status || order.status)}`}>
+                                        {order.current_shipment_status || order.status}
                                       </div>
                                     )}
                                   </div>
@@ -2637,8 +2799,8 @@ export function VendorDashboard() {
                                 e.stopPropagation();
                                 handleRequestReverse(order.order_id, order.products?.map((p: any) => p.unique_id));
                               }}
-                              disabled={reverseLoading[order.order_id]}
-                              className="w-full text-xs h-8 border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700"
+                              disabled={reverseLoading[order.order_id] || isUnclaimDisabled(order)}
+                              className="w-full text-xs h-8 border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                               {reverseLoading[order.order_id] ? (
                                 <>
@@ -2804,8 +2966,14 @@ export function VendorDashboard() {
                                 </div>
                               </TableCell>
                               <TableCell>
-                               <span className="text-sm font-medium text-gray-800">{order.status || "N/A"}</span>
-                             </TableCell>
+                                {(order.current_shipment_status || order.status) ? (
+                                  <div className={`text-xs font-medium px-2 py-1 rounded-full inline-block ${getShipmentBadgeClasses(order.current_shipment_status || order.status)}`}>
+                                    {order.current_shipment_status || order.status}
+                                  </div>
+                                ) : (
+                                  <span className="text-sm font-medium text-gray-800">N/A</span>
+                                )}
+                              </TableCell>
                               <TableCell>
                                 <Button 
                                   size="sm" 
@@ -2814,8 +2982,8 @@ export function VendorDashboard() {
                                     e.stopPropagation();
                                     handleRequestReverse(order.order_id, order.products?.map((p: any) => p.unique_id));
                                   }}
-                                  disabled={reverseLoading[order.order_id]}
-                                  className="text-xs px-3 py-1 h-8"
+                                  disabled={reverseLoading[order.order_id] || isUnclaimDisabled(order)}
+                                  className="text-xs px-3 py-1 h-8 disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                   {reverseLoading[order.order_id] ? (
                                     <>
@@ -2867,12 +3035,12 @@ export function VendorDashboard() {
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <h4 className="font-medium text-sm sm:text-base truncate">{order.order_id}</h4>
-                                    {order.status && (
-                                      <div className={`text-xs font-medium text-blue-800 py-0.5 bg-blue-100 rounded-full border border-blue-200 text-center ${
-                                        order.status.length <= 10 ? 'px-1.5' : 
-                                        order.status.length <= 20 ? 'px-2' : 'px-2.5'
+                                    {(order.current_shipment_status || order.status) && (
+                                      <div className={`text-xs font-medium py-0.5 rounded-full text-center ${getShipmentBadgeClasses(order.current_shipment_status || order.status)} ${
+                                        (order.current_shipment_status || order.status).length <= 10 ? 'px-1.5' : 
+                                        (order.current_shipment_status || order.status).length <= 20 ? 'px-2' : 'px-2.5'
                                       }`}>
-                                        {order.status}
+                                        {order.current_shipment_status || order.status}
                                       </div>
                                     )}
                                   </div>
@@ -2910,6 +3078,51 @@ export function VendorDashboard() {
                                   </div>
                                 </div>
                               ))}
+                            </div>
+                            
+                            {/* Action Buttons Row - Full Width at Bottom */}
+                            <div className="flex gap-2">
+                              <Button 
+                                size="sm" 
+                                variant="outline" 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const manifestId = order.manifest_id;
+                                  if (manifestId) {
+                                    downloadManifestSummary([manifestId]);
+                                  } else {
+                                    toast({
+                                      title: "Error",
+                                      description: "Manifest ID not found",
+                                      variant: "destructive",
+                                    });
+                                  }
+                                }}
+                                disabled={order.is_handover === 1}
+                                className="flex-1 text-xs h-8 border-green-300 text-green-600 hover:bg-green-50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                              >
+                                <Download className="w-3 h-3 mr-1" />
+                                Manifest
+                              </Button>
+                              <Button 
+                                size="sm" 
+                                variant="outline" 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleRequestReverse(order.order_id, order.products?.map((p: any) => p.unique_id));
+                                }}
+                                disabled={reverseLoading[order.order_id] || isUnclaimDisabled(order)}
+                                className="flex-1 text-xs h-8 border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                {reverseLoading[order.order_id] ? (
+                                  <>
+                                    <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-red-600 mr-1"></div>
+                                    Unclaiming...
+                                  </>
+                                ) : (
+                                  'Unclaim Order'
+                                )}
+                              </Button>
                             </div>
                           </div>
                         </Card>
@@ -2984,17 +3197,60 @@ export function VendorDashboard() {
                               </div>
                             </TableCell>
                             <TableCell>
-                              {order.status && (
-                                <div className="text-xs font-medium text-blue-800 px-2 py-1 bg-blue-100 rounded-full border border-blue-200 inline-block">
-                                  {order.status}
+                              {(order.current_shipment_status || order.status) && (
+                                <div className={`text-xs font-medium px-2 py-1 rounded-full inline-block ${getShipmentBadgeClasses(order.current_shipment_status || order.status)}`}>
+                                  {order.current_shipment_status || order.status}
                                 </div>
                               )}
-                              {!order.status && (
+                              {!(order.current_shipment_status || order.status) && (
                                 <span className="text-sm font-medium text-gray-800">N/A</span>
                               )}
                             </TableCell>
                             <TableCell>
-                              <Badge variant="outline">Ready for Pickup</Badge>
+                              <div className="flex items-center gap-2">
+                                <Button 
+                                  size="sm" 
+                                  variant="outline"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    // Get manifest_id from order (should be available in handover tab)
+                                    const manifestId = order.manifest_id;
+                                    if (manifestId) {
+                                      downloadManifestSummary([manifestId]);
+                                    } else {
+                                      toast({
+                                        title: "Error",
+                                        description: "Manifest ID not found for this order",
+                                        variant: "destructive",
+                                      });
+                                    }
+                                  }}
+                                  disabled={order.is_handover === 1}
+                                  className="text-xs px-3 py-1 h-8 border-green-300 text-green-600 hover:bg-green-50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                                >
+                                  <Download className="w-3 h-3 mr-1" />
+                                  Manifest
+                                </Button>
+                                <Button 
+                                  size="sm" 
+                                  variant="destructive" 
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleRequestReverse(order.order_id, order.products?.map((p: any) => p.unique_id));
+                                  }}
+                                  disabled={reverseLoading[order.order_id] || isUnclaimDisabled(order)}
+                                  className="text-xs px-3 py-1 h-8 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                  {reverseLoading[order.order_id] ? (
+                                    <>
+                                      <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-1"></div>
+                                      Loading...
+                                    </>
+                                  ) : (
+                                    'Unclaim'
+                                  )}
+                                </Button>
+                              </div>
                             </TableCell>
                           </TableRow>
                         ))}
