@@ -34,6 +34,8 @@ import {
   Menu,
   X,
   ChevronUp,
+  Loader2,
+  Truck,
 } from "lucide-react"
 import { useAuth } from "@/components/auth/auth-provider"
 import { useToast } from "@/hooks/use-toast"
@@ -171,6 +173,11 @@ export function VendorDashboard() {
       dateFrom: undefined as Date | undefined,
       dateTo: undefined as Date | undefined,
     },
+    "order-tracking": {
+      searchTerm: "",
+      dateFrom: undefined as Date | undefined,
+      dateTo: undefined as Date | undefined,
+    },
   })
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [showRevenueModal, setShowRevenueModal] = useState(false)
@@ -179,7 +186,10 @@ export function VendorDashboard() {
   const [upiId, setUpiId] = useState("")
   const [selectedMyOrders, setSelectedMyOrders] = useState<string[]>([])
   const [selectedUnclaimedOrders, setSelectedUnclaimedOrders] = useState<string[]>([])
+  const [selectedHandoverOrders, setSelectedHandoverOrders] = useState<string[]>([])
+  const [selectedTrackingOrders, setSelectedTrackingOrders] = useState<string[]>([])
   const [bulkMarkReadyLoading, setBulkMarkReadyLoading] = useState(false)
+  const [manifestDownloadLoading, setManifestDownloadLoading] = useState<string | null>(null)
   const [vendorAddress, setVendorAddress] = useState<null | {
     warehouseId: string
     address: string
@@ -210,6 +220,24 @@ export function VendorDashboard() {
   const [allGroupedOrders, setAllGroupedOrders] = useState<any[]>([]);
   const [isLoadingAllOrders, setIsLoadingAllOrders] = useState(false);
 
+  // Handover orders state
+  const [handoverOrders, setHandoverOrders] = useState<any[]>([]);
+  const [handoverOrdersLoading, setHandoverOrdersLoading] = useState(true);
+  const [handoverOrdersError, setHandoverOrdersError] = useState("");
+  const [handoverOrdersPage, setHandoverOrdersPage] = useState(1);
+  const [handoverOrdersHasMore, setHandoverOrdersHasMore] = useState(true);
+  const [handoverOrdersTotalCount, setHandoverOrdersTotalCount] = useState(0);
+  const [handoverOrdersTotalQuantity, setHandoverOrdersTotalQuantity] = useState(0);
+
+  // Order Tracking orders state
+  const [trackingOrders, setTrackingOrders] = useState<any[]>([]);
+  const [trackingOrdersLoading, setTrackingOrdersLoading] = useState(true);
+  const [trackingOrdersError, setTrackingOrdersError] = useState("");
+  const [trackingOrdersPage, setTrackingOrdersPage] = useState(1);
+  const [trackingOrdersHasMore, setTrackingOrdersHasMore] = useState(true);
+  const [trackingOrdersTotalCount, setTrackingOrdersTotalCount] = useState(0);
+  const [trackingOrdersTotalQuantity, setTrackingOrdersTotalQuantity] = useState(0);
+
   // Settlement-related state
   const [payments, setPayments] = useState<{ currentPayment: number; futurePayment: number } | null>(null)
   const [paymentsLoading, setPaymentsLoading] = useState(false)
@@ -235,6 +263,9 @@ export function VendorDashboard() {
   
   // Status filter state for handover tab
   const [selectedStatuses, setSelectedStatuses] = useState<string[]>([])
+  
+  // Status filter state for order tracking tab
+  const [selectedTrackingStatuses, setSelectedTrackingStatuses] = useState<string[]>([])
   
   // Label download filter state for my orders tab
   const [selectedLabelFilter, setSelectedLabelFilter] = useState<string>('all')
@@ -378,6 +409,14 @@ export function VendorDashboard() {
       } else {
         console.log('⚠️ Failed to refresh grouped orders');
       }
+
+      // Refresh Handover orders
+      console.log('🔄 Refreshing handover orders data...');
+      await fetchHandoverOrders();
+
+      // Refresh Order Tracking orders
+      console.log('🔄 Refreshing order tracking orders data...');
+      await fetchOrderTrackingOrders();
     } catch (err: any) {
       console.error("Error refreshing orders:", err);
       setOrdersError(err.message || "Failed to refresh orders");
@@ -506,9 +545,81 @@ export function VendorDashboard() {
     }
   }
 
+  const fetchHandoverOrders = async (resetPagination: boolean = true) => {
+    if (resetPagination) {
+      setHandoverOrdersLoading(true);
+      setHandoverOrdersPage(1);
+    }
+    
+    setHandoverOrdersError("");
+    
+    try {
+      const page = resetPagination ? 1 : handoverOrdersPage;
+      const response = await apiClient.getHandoverOrders(page, 50);
+      
+      if (response.success && response.data) {
+        const newOrders = response.data.handoverOrders || [];
+        
+        if (resetPagination) {
+          setHandoverOrders(newOrders);
+        } else {
+          setHandoverOrders(prev => [...prev, ...newOrders]);
+        }
+        
+        setHandoverOrdersHasMore(response.data.pagination?.has_next || false);
+        setHandoverOrdersTotalCount(response.data.summary?.total_orders || 0);
+        setHandoverOrdersTotalQuantity(response.data.summary?.total_quantity || 0);
+      }
+    } catch (err: any) {
+      setHandoverOrdersError(err.message || "Failed to fetch handover orders");
+      if (resetPagination) {
+        setHandoverOrders([]);
+      }
+    } finally {
+      setHandoverOrdersLoading(false);
+    }
+  };
+
+  const fetchOrderTrackingOrders = async (resetPagination: boolean = true) => {
+    if (resetPagination) {
+      setTrackingOrdersLoading(true);
+      setTrackingOrdersPage(1);
+    }
+    
+    setTrackingOrdersError("");
+    
+    try {
+      const page = resetPagination ? 1 : trackingOrdersPage;
+      const response = await apiClient.getOrderTrackingOrders(page, 50);
+      
+      if (response.success && response.data) {
+        const newOrders = response.data.trackingOrders || [];
+        
+        if (resetPagination) {
+          setTrackingOrders(newOrders);
+        } else {
+          setTrackingOrders(prev => [...prev, ...newOrders]);
+        }
+        
+        setTrackingOrdersHasMore(response.data.pagination?.has_next || false);
+        setTrackingOrdersTotalCount(response.data.summary?.total_orders || 0);
+        setTrackingOrdersTotalQuantity(response.data.summary?.total_quantity || 0);
+      }
+    } catch (err: any) {
+      setTrackingOrdersError(err.message || "Failed to fetch order tracking orders");
+      if (resetPagination) {
+        setTrackingOrders([]);
+      }
+    } finally {
+      setTrackingOrdersLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchOrders();
     fetchGroupedOrders();
+    fetchHandoverOrders();
+    fetchOrderTrackingOrders();
   }, []);
 
   // Fetch all orders when filters are applied on My Orders tab
@@ -679,7 +790,10 @@ export function VendorDashboard() {
   }
 
   const downloadManifestSummary = async (manifestIds: string[]) => {
+    const manifestKey = manifestIds.join(',');
     try {
+      setManifestDownloadLoading(manifestKey);
+      
       const vendorToken = localStorage.getItem('vendorToken');
       if (!vendorToken) {
         console.error('No vendor token found');
@@ -721,6 +835,61 @@ export function VendorDashboard() {
       toast({
         title: "Download Failed",
         description: "Failed to download manifest summary PDF",
+        variant: "destructive",
+      });
+    } finally {
+      setManifestDownloadLoading(null);
+    }
+  };
+
+  const handleBulkManifestDownload = async () => {
+    if (selectedHandoverOrders.length === 0) {
+      toast({
+        title: "No Orders Selected",
+        description: "Please select at least one order to download manifests",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      // Get filtered orders for handover tab
+      const handoverOrders = getFilteredOrdersForTab("handover");
+      
+      // Extract unique manifest_ids from selected orders
+      const uniqueManifestIds = new Set<string>();
+      
+      selectedHandoverOrders.forEach(orderId => {
+        const order = handoverOrders.find((o: any) => o.order_id === orderId);
+        if (order && order.manifest_id) {
+          uniqueManifestIds.add(order.manifest_id);
+        }
+      });
+
+      const manifestIdsArray = Array.from(uniqueManifestIds);
+
+      if (manifestIdsArray.length === 0) {
+        toast({
+          title: "No Manifest IDs Found",
+          description: "Selected orders do not have manifest IDs",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      console.log('📥 Bulk downloading manifests:', manifestIdsArray);
+      
+      // Download all manifests in single PDF
+      await downloadManifestSummary(manifestIdsArray);
+      
+      // Clear selection after successful download
+      setSelectedHandoverOrders([]);
+      
+    } catch (error) {
+      console.error('Bulk manifest download error:', error);
+      toast({
+        title: "Download Failed",
+        description: "Failed to download manifests",
         variant: "destructive",
       });
     }
@@ -789,6 +958,7 @@ export function VendorDashboard() {
         highlightTab("handover");
         
         fetchGroupedOrders();
+        fetchHandoverOrders();
       } else {
         toast({
           title: "Error",
@@ -1162,12 +1332,186 @@ export function VendorDashboard() {
     return ensureUniqueOrders(baseOrders, deduplicationKey);
   }
 
+  // Filter handover orders based on search/date/status filters
+  const getFilteredHandoverOrders = () => {
+    let filtered = [...handoverOrders];
+    const tabFilter = tabFilters["handover"];
+    
+    // Apply status filter if any statuses are selected
+    if (selectedStatuses.length > 0) {
+      filtered = filtered.filter(order => 
+        selectedStatuses.includes(order.status)
+      );
+    }
+    
+    // Apply search filter
+    if (tabFilter.searchTerm.trim()) {
+      const term = tabFilter.searchTerm.toLowerCase();
+      filtered = filtered.filter(order => {
+        const orderId = String(order.order_id || '').toLowerCase();
+        const customer = String(order.customer_name || '').toLowerCase();
+        
+        // Search through products array
+        if (Array.isArray(order.products) && order.products.length > 0) {
+          const productMatch = order.products.some((product: any) => {
+            const name = String(product.product_name || '').toLowerCase();
+            const sku = String(product.product_code || '').toLowerCase();
+            return name.includes(term) || sku.includes(term);
+          });
+          return orderId.includes(term) || customer.includes(term) || productMatch;
+        }
+        return orderId.includes(term) || customer.includes(term);
+      });
+    }
+    
+    // Apply date range filter
+    if (tabFilter.dateFrom && tabFilter.dateTo) {
+      filtered = filtered.filter(order => {
+        const orderDate = order.order_date;
+        if (!orderDate) return true;
+        
+        try {
+          const orderDateObj = new Date(orderDate);
+          const fromDateObj = new Date(tabFilter.dateFrom!);
+          const toDateObj = new Date(tabFilter.dateTo!);
+          toDateObj.setHours(23, 59, 59, 999);
+          
+          return orderDateObj >= fromDateObj && orderDateObj <= toDateObj;
+        } catch (error) {
+          return true;
+        }
+      });
+    } else if (tabFilter.dateFrom) {
+      filtered = filtered.filter(order => {
+        const orderDate = order.order_date;
+        if (!orderDate) return true;
+        
+        try {
+          const orderDateObj = new Date(orderDate);
+          const fromDateObj = new Date(tabFilter.dateFrom!);
+          return orderDateObj >= fromDateObj;
+        } catch (error) {
+          return true;
+        }
+      });
+    } else if (tabFilter.dateTo) {
+      filtered = filtered.filter(order => {
+        const orderDate = order.order_date;
+        if (!orderDate) return true;
+        
+        try {
+          const orderDateObj = new Date(orderDate);
+          const toDateObj = new Date(tabFilter.dateTo!);
+          toDateObj.setHours(23, 59, 59, 999);
+          return orderDateObj <= toDateObj;
+        } catch (error) {
+          return true;
+        }
+      });
+    }
+    
+    return filtered;
+  };
+
+  // Filter tracking orders based on search/date/status filters
+  const getFilteredTrackingOrders = () => {
+    let filtered = [...trackingOrders];
+    const tabFilter = tabFilters["order-tracking"];
+    
+    // Apply status filter if any statuses are selected
+    if (selectedTrackingStatuses.length > 0) {
+      filtered = filtered.filter(order => 
+        selectedTrackingStatuses.includes(order.current_shipment_status || order.status)
+      );
+    }
+    
+    // Apply search filter
+    if (tabFilter.searchTerm.trim()) {
+      const term = tabFilter.searchTerm.toLowerCase();
+      filtered = filtered.filter(order => {
+        const orderId = String(order.order_id || '').toLowerCase();
+        const awb = String(order.products?.[0]?.awb || '').toLowerCase();
+        
+        // Search through products array
+        if (Array.isArray(order.products) && order.products.length > 0) {
+          const productMatch = order.products.some((product: any) => {
+            const name = String(product.product_name || '').toLowerCase();
+            const sku = String(product.product_code || '').toLowerCase();
+            return name.includes(term) || sku.includes(term);
+          });
+          return orderId.includes(term) || awb.includes(term) || productMatch;
+        }
+        return orderId.includes(term) || awb.includes(term);
+      });
+    }
+    
+    // Apply date range filter
+    if (tabFilter.dateFrom && tabFilter.dateTo) {
+      filtered = filtered.filter(order => {
+        const orderDate = order.order_date;
+        if (!orderDate) return true;
+        
+        try {
+          const orderDateObj = new Date(orderDate);
+          const fromDateObj = new Date(tabFilter.dateFrom!);
+          const toDateObj = new Date(tabFilter.dateTo!);
+          toDateObj.setHours(23, 59, 59, 999);
+          
+          return orderDateObj >= fromDateObj && orderDateObj <= toDateObj;
+        } catch (error) {
+          return true;
+        }
+      });
+    } else if (tabFilter.dateFrom) {
+      filtered = filtered.filter(order => {
+        const orderDate = order.order_date;
+        if (!orderDate) return true;
+        
+        try {
+          const orderDateObj = new Date(orderDate);
+          const fromDateObj = new Date(tabFilter.dateFrom!);
+          return orderDateObj >= fromDateObj;
+        } catch (error) {
+          return true;
+        }
+      });
+    } else if (tabFilter.dateTo) {
+      filtered = filtered.filter(order => {
+        const orderDate = order.order_date;
+        if (!orderDate) return true;
+        
+        try {
+          const orderDateObj = new Date(orderDate);
+          const toDateObj = new Date(tabFilter.dateTo!);
+          toDateObj.setHours(23, 59, 59, 999);
+          return orderDateObj <= toDateObj;
+        } catch (error) {
+          return true;
+        }
+      });
+    }
+    
+    return filtered;
+  };
+
   // Get unique status values from orders data
   const getUniqueStatuses = () => {
     const uniqueStatuses = new Set<string>();
     orders.forEach(order => {
       if (order.status && order.status.trim() !== '') {
         uniqueStatuses.add(order.status);
+      }
+    });
+    return Array.from(uniqueStatuses).sort();
+  }
+
+  // Get unique shipment status values from tracking orders
+  const getUniqueTrackingStatuses = () => {
+    const uniqueStatuses = new Set<string>();
+    trackingOrders.forEach(order => {
+      const status = order.current_shipment_status || order.status;
+      if (status && status.trim() !== '') {
+        uniqueStatuses.add(status);
       }
     });
     return Array.from(uniqueStatuses).sort();
@@ -1838,29 +2182,11 @@ export function VendorDashboard() {
       
       return groupedOrdersTotalQuantity;
     } else if (tabName === "handover") {
-      // For Handover, calculate total without status filters
-      const currentVendorId = user?.warehouseId;
-      const handoverOrders = orders.filter(order => 
-        order.claims_status === 'ready_for_handover' && 
-        order.claimed_by === currentVendorId &&
-        order.is_manifest === 1
-      );
-      
-      // Group orders by order_id for handover tab (no status filtering)
-      const handoverGrouped = handoverOrders.reduce((acc: any, order) => {
-        const orderId = order.order_id;
-        if (!acc[orderId]) {
-          acc[orderId] = {
-            total_quantity: 0
-          };
-        }
-        acc[orderId].total_quantity += order.quantity || 0;
-        return acc;
-      }, {});
-      
-      return Object.values(handoverGrouped).reduce((sum: number, order: any) => {
-        return sum + (order.total_quantity || 0);
-      }, 0);
+      // For Handover card, use the API total quantity
+      return handoverOrdersTotalQuantity;
+    } else if (tabName === "order-tracking") {
+      // For Order Tracking card, use the API total quantity
+      return trackingOrdersTotalQuantity;
     } else {
       // For All Orders card, show absolute total of unclaimed orders (no additional filters)
       const unclaimedOrders = orders.filter(order => order.status === 'unclaimed');
@@ -1913,8 +2239,18 @@ export function VendorDashboard() {
         return filteredTotal;
       }
     } else if (tabName === "handover") {
-      // For Handover tab, use filtered results (applies search, date, status filters)
-      const filteredOrders = getFilteredOrdersForTab(tabName);
+      // For Handover tab, use filtered handover orders
+      const filteredOrders = getFilteredHandoverOrders();
+      
+      // Calculate total quantity from filtered orders
+      const filteredTotal = filteredOrders.reduce((sum, order) => {
+        return sum + (order.total_quantity || 0);
+      }, 0);
+      
+      return filteredTotal;
+    } else if (tabName === "order-tracking") {
+      // For Order Tracking tab, use filtered tracking orders
+      const filteredOrders = getFilteredTrackingOrders();
       
       // Calculate total quantity from filtered orders
       const filteredTotal = filteredOrders.reduce((sum, order) => {
@@ -1980,6 +2316,7 @@ export function VendorDashboard() {
           "all-orders": { searchTerm: "", dateFrom: undefined, dateTo: undefined },
           "my-orders": { searchTerm: "", dateFrom: undefined, dateTo: undefined },
           "handover": { searchTerm: "", dateFrom: undefined, dateTo: undefined },
+          "order-tracking": { searchTerm: "", dateFrom: undefined, dateTo: undefined },
         });
         
         // Re-fetch all orders and grouped orders
@@ -2004,6 +2341,12 @@ export function VendorDashboard() {
             
             console.log('✅ FRONTEND: Grouped orders refreshed successfully');
           }
+
+          // Refresh Handover orders
+          await fetchHandoverOrders();
+
+          // Refresh Order Tracking orders
+          await fetchOrderTrackingOrders();
         } catch (refreshError) {
           console.log('⚠️ FRONTEND: Failed to refresh orders data, but Shipway sync was successful');
         }
@@ -2078,16 +2421,29 @@ export function VendorDashboard() {
               </>
             )}
 
-            {/* Mobile Menu Button */}
+            {/* Mobile Icons - Tracking and Menu */}
             {isMobile && (
-              <Button 
-                variant="ghost" 
-                size="sm"
-                onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-                className="p-2"
-              >
-                {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-              </Button>
+              <div className="flex items-center gap-2">
+                {/* Tracking Icon Button */}
+                <Button 
+                  variant="ghost" 
+                  size="sm"
+                  onClick={() => setActiveTab("order-tracking")}
+                  className="p-2"
+                  title="Order Tracking"
+                >
+                  <Truck className="w-5 h-5" />
+                </Button>
+                {/* Menu Button */}
+                <Button 
+                  variant="ghost" 
+                  size="sm"
+                  onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                  className="p-2"
+                >
+                  {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+                </Button>
+              </div>
             )}
           </div>
 
@@ -2195,16 +2551,21 @@ export function VendorDashboard() {
             </CardContent>
           </Card>
 
-          {/* Coming Soon Card - Placeholder */}
-          <Card className="bg-gradient-to-br from-gray-300 to-gray-400 text-gray-600 border-0 shadow-lg opacity-50">
+          {/* Order Tracking Card */}
+          <Card 
+            className={`bg-gradient-to-br from-purple-500 to-purple-600 text-white border-0 shadow-lg cursor-pointer hover:shadow-xl transition-all duration-200 hover:scale-[1.02] ${activeTab === "order-tracking" ? 'ring-2 ring-purple-300 ring-offset-2' : ''}`}
+            onClick={() => setActiveTab("order-tracking")}
+          >
             <CardContent className={`${isMobile ? 'p-2.5 sm:p-4' : 'p-6'}`}>
               <div className="flex items-center justify-between gap-1">
                 <div className="min-w-0 flex-1">
-                  <p className={`font-medium text-gray-500 opacity-90 truncate ${isMobile ? 'text-[10px] sm:text-xs' : 'text-sm'}`}>Coming Soon</p>
-                  <p className={`font-bold mt-0.5 sm:mt-1 truncate ${isMobile ? 'text-base sm:text-xl' : 'text-2xl'}`}>--</p>
+                  <p className={`font-medium text-purple-100 opacity-90 truncate ${isMobile ? 'text-[10px] sm:text-xs' : 'text-sm'}`}>Order Tracking</p>
+                  <p className={`font-bold mt-0.5 sm:mt-1 truncate ${isMobile ? 'text-base sm:text-xl' : 'text-2xl'}`}>
+                    {getTotalQuantitySumForTab("order-tracking")}
+                  </p>
                 </div>
                 <div className={`bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0 ${isMobile ? 'w-8 h-8 sm:w-10 sm:h-10' : 'w-12 h-12'}`}>
-                  <Settings className={`${isMobile ? 'w-4 h-4 sm:w-5 sm:h-5' : 'w-6 h-6'}`} />
+                  <Truck className={`${isMobile ? 'w-4 h-4 sm:w-5 sm:h-5' : 'w-6 h-6'}`} />
                 </div>
               </div>
             </CardContent>
@@ -2253,7 +2614,7 @@ export function VendorDashboard() {
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
               {/* Fixed Controls Section */}
               <div className={`sticky ${isMobile ? 'top-16' : 'top-20'} bg-white z-40 pb-3 sm:pb-4 border-b mb-3 sm:mb-4`}>
-                <TabsList className={`grid w-full grid-cols-3 ${isMobile ? 'h-auto mb-3 sm:mb-4' : 'mb-6'}`}>
+                <TabsList className={`grid w-full ${isMobile ? 'grid-cols-3' : 'grid-cols-4'} ${isMobile ? 'h-auto mb-3 sm:mb-4' : 'mb-6'}`}>
                   <TabsTrigger value="all-orders" className={`${isMobile ? 'text-xs sm:text-sm px-1.5 sm:px-2 py-2.5 sm:py-3' : ''}`}>
                     All ({getQuantitySumForTab("all-orders")})
                   </TabsTrigger>
@@ -2277,11 +2638,24 @@ export function VendorDashboard() {
                   >
                     Handover ({getQuantitySumForTab("handover")})
                   </TabsTrigger>
+                  {/* Order Tracking Tab - Desktop Only (Mobile users use the tracking icon in header) */}
+                  {!isMobile && (
+                    <TabsTrigger 
+                      value="order-tracking"
+                      className={`${
+                        highlightedTab === "order-tracking" 
+                          ? 'bg-purple-100 text-purple-700 border-purple-300 shadow-lg scale-105 transition-all duration-300' 
+                          : ''
+                      }`}
+                    >
+                      Order Tracking ({getQuantitySumForTab("order-tracking")})
+                    </TabsTrigger>
+                  )}
                 </TabsList>
 
                 {/* Filters */}
-                <div className={`flex flex-col gap-3 mb-2 md:mb-3 ${!isMobile && 'sm:flex-row sm:items-center'}`}>
-                  <div className="flex-1 min-w-0">
+                <div className={`flex flex-col gap-2 mb-2 md:mb-3 ${!isMobile && 'sm:flex-row sm:items-center'}`}>
+                  <div className="flex-1 min-w-[200px]">
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                       <Input
@@ -2318,7 +2692,7 @@ export function VendorDashboard() {
                   
                   {/* Status Filter - Desktop Only for Handover Tab */}
                   {!isMobile && activeTab === "handover" && (
-                    <div className="flex-1 min-w-0">
+                    <div className="w-[180px] flex-shrink-0">
                       <Select value={selectedStatuses.length > 0 ? selectedStatuses.join(',') : 'all'} onValueChange={(value) => {
                         if (value === 'all') {
                           setSelectedStatuses([]);
@@ -2341,6 +2715,31 @@ export function VendorDashboard() {
                     </div>
                   )}
                   
+                  {/* Status Filter - Desktop Only for Order Tracking Tab */}
+                  {!isMobile && activeTab === "order-tracking" && (
+                    <div className="w-[280px] flex-shrink-0">
+                      <Select value={selectedTrackingStatuses.length > 0 ? selectedTrackingStatuses.join(',') : 'all'} onValueChange={(value) => {
+                        if (value === 'all') {
+                          setSelectedTrackingStatuses([]);
+                        } else {
+                          setSelectedTrackingStatuses(value.split(','));
+                        }
+                      }}>
+                        <SelectTrigger className="w-full px-4 py-2">
+                          <SelectValue placeholder="Filter by Shipment Status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Statuses</SelectItem>
+                          {getUniqueTrackingStatuses().map((status) => (
+                            <SelectItem key={status} value={status}>
+                              {status.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                  
                   
                   <div className={`flex gap-2 items-center ${isMobile ? 'w-full' : ''}`}>
                     {/* Date Range Container - Responsive width */}
@@ -2349,14 +2748,14 @@ export function VendorDashboard() {
                         date={getCurrentTabFilters().dateFrom}
                         onDateChange={(date) => updateCurrentTabFilter('dateFrom', date)}
                         placeholder={isMobile ? "From" : "From date"}
-                        className={`${isMobile ? 'flex-1 min-w-0' : 'w-40'}`}
+                        className={`${isMobile ? 'flex-1 min-w-0' : 'w-36'}`}
                       />
                       <span className="text-gray-500 text-sm px-1 flex-shrink-0">to</span>
                       <DatePicker
                         date={getCurrentTabFilters().dateTo}
                         onDateChange={(date) => updateCurrentTabFilter('dateTo', date)}
                         placeholder={isMobile ? "To" : "To date"}
-                        className={`${isMobile ? 'flex-1 min-w-0' : 'w-40'}`}
+                        className={`${isMobile ? 'flex-1 min-w-0' : 'w-36'}`}
                       />
                     </div>
                     
@@ -2387,8 +2786,35 @@ export function VendorDashboard() {
                                 ))}
                               </SelectContent>
                             </Select>
+                          </div>
+                        )}
+                        
+                        {/* Status Filter for Order Tracking */}
+                        {activeTab === "order-tracking" && (
+                          <div className="relative">
+                            <Select value={selectedTrackingStatuses.length > 0 ? selectedTrackingStatuses.join(',') : 'all'} onValueChange={(value) => {
+                              if (value === 'all') {
+                                setSelectedTrackingStatuses([]);
+                              } else {
+                                setSelectedTrackingStatuses(value.split(','));
+                              }
+                            }}>
+                              <SelectTrigger className="w-12 h-10 px-2 py-2 border border-gray-300 rounded-md bg-white hover:bg-gray-50 flex items-center justify-center">
+                                <SelectValue>
+                                  <Filter className="w-5 h-5 text-gray-600" />
+                                </SelectValue>
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="all">All Statuses</SelectItem>
+                                {getUniqueTrackingStatuses().map((status) => (
+                                  <SelectItem key={status} value={status}>
+                                    {status.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
                             {/* Blue dot indicator when filter is active */}
-                            {selectedStatuses.length > 0 && (
+                            {selectedTrackingStatuses.length > 0 && (
                               <div className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full border-2 border-white"></div>
                             )}
                           </div>
@@ -2418,6 +2844,27 @@ export function VendorDashboard() {
                       </div>
                     )}
                   </div>
+                  
+                  {/* Bulk Manifest Download Button - Desktop Only for Handover Tab */}
+                  {!isMobile && activeTab === "handover" && (
+                    <Button
+                      onClick={handleBulkManifestDownload}
+                      disabled={selectedHandoverOrders.length === 0 || manifestDownloadLoading !== null}
+                      className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 h-10"
+                    >
+                      {manifestDownloadLoading !== null ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Downloading...
+                        </>
+                      ) : (
+                        <>
+                          <Download className="w-4 h-4 mr-2" />
+                          Manifest Download ({selectedHandoverOrders.length})
+                        </>
+                      )}
+                    </Button>
+                  )}
                   
                   {/* Tab-specific Actions */}
                   {activeTab === "all-orders" && !isMobile && (
@@ -2506,7 +2953,7 @@ export function VendorDashboard() {
                         ) : (
                           <>
                             <CheckCircle className="w-4 h-4 mr-2" />
-                            Mark Ready ({getReadyOrdersQuantitySum()})
+                            Mark Ready ({selectedMyOrders.length})
                           </>
                         )}
                       </Button>
@@ -3025,22 +3472,44 @@ export function VendorDashboard() {
                 <TabsContent value="handover" className="mt-0">
                   {/* Mobile Card Layout */}
                   {isMobile ? (
-                    <div className="space-y-2.5 sm:space-y-3">
+                    <div className="space-y-2.5 sm:space-y-3 pb-32">
                       {getFilteredOrdersForTab("handover").map((order, index) => (
-                        <Card key={`${order.order_id}-${index}`} className="p-2.5 sm:p-3">
+                        <Card 
+                          key={`${order.order_id}-${index}`} 
+                          className="p-2.5 sm:p-3 cursor-pointer transition-colors hover:bg-gray-50"
+                          onClick={() => {
+                            if (selectedHandoverOrders.includes(order.order_id)) {
+                              setSelectedHandoverOrders(selectedHandoverOrders.filter((id) => id !== order.order_id))
+                            } else {
+                              setSelectedHandoverOrders([...selectedHandoverOrders, order.order_id])
+                            }
+                          }}
+                        >
                           <div className="space-y-1.5 sm:space-y-2">
-                            {/* Top Row: Order Info | Total */}
+                            {/* Top Row: Checkbox | Order Info | Total */}
                             <div className="flex items-center justify-between gap-1.5 sm:gap-2">
                               <div className="flex items-center gap-1.5 sm:gap-2 flex-1 min-w-0">
+                                {/* Checkbox */}
+                                <input
+                                  type="checkbox"
+                                  checked={selectedHandoverOrders.includes(order.order_id)}
+                                  onChange={(e) => {
+                                    e.stopPropagation();
+                                    if (e.target.checked) {
+                                      setSelectedHandoverOrders([...selectedHandoverOrders, order.order_id]);
+                                    } else {
+                                      setSelectedHandoverOrders(selectedHandoverOrders.filter(id => id !== order.order_id));
+                                    }
+                                  }}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0"
+                                />
                                 {/* Order Info (with inline status badge) */}
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <h4 className="font-medium text-sm sm:text-base truncate">{order.order_id}</h4>
                                     {(order.current_shipment_status || order.status) && (
-                                      <div className={`text-xs font-medium py-0.5 rounded-full text-center ${getShipmentBadgeClasses(order.current_shipment_status || order.status)} ${
-                                        (order.current_shipment_status || order.status).length <= 10 ? 'px-1.5' : 
-                                        (order.current_shipment_status || order.status).length <= 20 ? 'px-2' : 'px-2.5'
-                                      }`}>
+                                      <div className={`text-xs font-medium px-2 py-1 rounded-full ${getShipmentBadgeClasses(order.current_shipment_status || order.status)}`}>
                                         {order.current_shipment_status || order.status}
                                       </div>
                                     )}
@@ -3065,16 +3534,19 @@ export function VendorDashboard() {
                                     src={product.image || product.product_image || "/placeholder.svg"}
                                     alt={product.product_name}
                                     className="w-10 h-10 rounded-md object-cover cursor-pointer"
-                                    onClick={() => (product.image || product.product_image) && setSelectedImageProduct({url: product.image || product.product_image, title: product.product_name || "Product Image"})}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      (product.image || product.product_image) && setSelectedImageProduct({url: product.image || product.product_image, title: product.product_name || "Product Image"})
+                                    }}
                                     onError={(e) => {
                                       e.currentTarget.src = "/placeholder.svg";
                                     }}
                                   />
                                   <div className="flex-1 min-w-0">
-                                    <h5 className="font-medium text-sm break-words leading-relaxed">{product.product_name}</h5>
-                                    <p className="text-xs text-gray-500 break-words">Code: {product.product_code}</p>
+                                    <p className="text-xs font-medium break-words leading-relaxed">{product.product_name}</p>
+                                    <p className="text-xs text-gray-500 break-words leading-relaxed">Code: {product.product_code}</p>
                                   </div>
-                                  <div className="text-sm font-medium text-gray-700">
+                                  <div className="text-xs font-medium">
                                     {product.quantity || 0}
                                   </div>
                                 </div>
@@ -3099,11 +3571,20 @@ export function VendorDashboard() {
                                     });
                                   }
                                 }}
-                                disabled={order.is_handover === 1}
+                                disabled={order.is_handover === 1 || manifestDownloadLoading === order.manifest_id}
                                 className="flex-1 text-xs h-8 border-green-300 text-green-600 hover:bg-green-50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                               >
-                                <Download className="w-3 h-3 mr-1" />
-                                Manifest
+                                {manifestDownloadLoading === order.manifest_id ? (
+                                  <>
+                                    <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                    Downloading...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Download className="w-3 h-3 mr-1" />
+                                    Manifest
+                                  </>
+                                )}
                               </Button>
                               <Button 
                                 size="sm" 
@@ -3135,6 +3616,20 @@ export function VendorDashboard() {
                     <Table>
                       <TableHeader className="sticky top-0 bg-white z-30 shadow-sm border-b">
                         <TableRow>
+                          <TableHead className="w-12">
+                            <input
+                              type="checkbox"
+                              checked={selectedHandoverOrders.length === getFilteredOrdersForTab("handover").length && getFilteredOrdersForTab("handover").length > 0}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedHandoverOrders(getFilteredOrdersForTab("handover").map((o: any) => o.order_id));
+                                } else {
+                                  setSelectedHandoverOrders([]);
+                                }
+                              }}
+                              className="w-4 h-4 cursor-pointer"
+                            />
+                          </TableHead>
                           <TableHead>Order ID</TableHead>
                           <TableHead>Order Date</TableHead>
                           <TableHead>Products</TableHead>
@@ -3146,6 +3641,21 @@ export function VendorDashboard() {
                       <TableBody>
                         {getFilteredOrdersForTab("handover").map((order, index) => (
                           <TableRow key={`${order.order_id}-${index}`}>
+                            <TableCell>
+                              <input
+                                type="checkbox"
+                                checked={selectedHandoverOrders.includes(order.order_id)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedHandoverOrders([...selectedHandoverOrders, order.order_id]);
+                                  } else {
+                                    setSelectedHandoverOrders(selectedHandoverOrders.filter(id => id !== order.order_id));
+                                  }
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                                className="w-4 h-4 cursor-pointer"
+                              />
+                            </TableCell>
                             <TableCell className="font-medium">{order.order_id}</TableCell>
                             <TableCell>
                               {order.order_date ? (
@@ -3226,11 +3736,20 @@ export function VendorDashboard() {
                                       });
                                     }
                                   }}
-                                  disabled={order.is_handover === 1}
+                                  disabled={order.is_handover === 1 || manifestDownloadLoading === order.manifest_id}
                                   className="text-xs px-3 py-1 h-8 border-green-300 text-green-600 hover:bg-green-50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                                 >
-                                  <Download className="w-3 h-3 mr-1" />
-                                  Manifest
+                                  {manifestDownloadLoading === order.manifest_id ? (
+                                    <>
+                                      <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                      Downloading...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Download className="w-3 h-3 mr-1" />
+                                      Manifest
+                                    </>
+                                  )}
                                 </Button>
                                 <Button 
                                   size="sm" 
@@ -3378,7 +3897,7 @@ export function VendorDashboard() {
                         ) : (
                           <>
                             <CheckCircle className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2 flex-shrink-0" />
-                            <span className="truncate">Ready ({getReadyOrdersQuantitySum()})</span>
+                            <span className="truncate">Ready ({selectedMyOrders.length})</span>
                           </>
                         )}
                       </Button>
@@ -3387,8 +3906,69 @@ export function VendorDashboard() {
                 </div>
               )}
 
-              {/* Fixed Move to Top Button for Desktop All Orders, My Orders, and Handover */}
-              {!isMobile && (activeTab === "all-orders" || activeTab === "my-orders" || activeTab === "handover") && (
+              {/* Fixed Bottom Buttons for Mobile Handover */}
+              {isMobile && activeTab === "handover" && (
+                <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-2 sm:p-4 shadow-lg z-50">
+                  <div className="flex flex-col gap-2 sm:gap-3">
+                    {/* Select All Checkbox */}
+                    <div className="flex items-center gap-2 sm:gap-3 justify-end">
+                      <div className="flex items-center gap-1.5 sm:gap-2 whitespace-nowrap flex-shrink-0">
+                        <input
+                          type="checkbox"
+                          onChange={(e) => {
+                            const handoverOrders = getFilteredOrdersForTab("handover")
+                            if (e.target.checked) {
+                              setSelectedHandoverOrders(handoverOrders.map((o) => o.order_id))
+                            } else {
+                              setSelectedHandoverOrders([])
+                            }
+                          }}
+                          checked={
+                            selectedHandoverOrders.length > 0 &&
+                            selectedHandoverOrders.length === getFilteredOrdersForTab("handover").length
+                          }
+                          className="w-3.5 h-3.5 sm:w-4 sm:h-4"
+                        />
+                        <span className="text-sm sm:text-base font-medium">Select All</span>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-2 sm:gap-3">
+                      {/* Move to Top Button */}
+                      <Button
+                        onClick={scrollToTop}
+                        variant="outline"
+                        size="sm"
+                        className="h-9 w-9 sm:h-10 sm:w-10 p-0 rounded-full border-gray-300 hover:bg-gray-50 flex-shrink-0"
+                      >
+                        <ChevronUp className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                      </Button>
+                      
+                      {/* Bulk Manifest Download Button */}
+                      <Button 
+                        onClick={handleBulkManifestDownload}
+                        disabled={selectedHandoverOrders.length === 0 || manifestDownloadLoading !== null}
+                        className="flex-1 h-10 sm:h-12 text-sm sm:text-lg font-medium bg-gradient-to-br from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 border-0 shadow-lg min-w-0"
+                      >
+                        {manifestDownloadLoading !== null ? (
+                          <>
+                            <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2 flex-shrink-0 animate-spin" />
+                            <span className="truncate">{isMobile ? 'Loading' : 'Downloading...'}</span>
+                          </>
+                        ) : (
+                          <>
+                            <Download className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2 flex-shrink-0" />
+                            <span className="truncate">Manifest Download ({selectedHandoverOrders.length})</span>
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Fixed Move to Top Button for Desktop All Orders, My Orders, Handover, and Order Tracking */}
+              {!isMobile && (activeTab === "all-orders" || activeTab === "my-orders" || activeTab === "handover" || activeTab === "order-tracking") && (
                 <Button
                   onClick={scrollToTop}
                   variant="outline"
@@ -3398,6 +3978,200 @@ export function VendorDashboard() {
                   <ChevronUp className="w-5 h-5" />
                 </Button>
               )}
+              
+              {/* Order Tracking Tab Content - Shows orders that have been in handover for 24+ hours */}
+              <TabsContent value="order-tracking" className="mt-0">
+                {trackingOrdersLoading ? (
+                  <div className="flex items-center justify-center py-12">
+                    <div className="text-center">
+                      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto mb-4"></div>
+                      <p className="text-gray-600">Loading order tracking data...</p>
+                    </div>
+                  </div>
+                ) : trackingOrdersError ? (
+                  <div className="flex items-center justify-center py-12">
+                    <div className="text-center">
+                      <p className="text-red-600">{trackingOrdersError}</p>
+                      <Button onClick={() => fetchOrderTrackingOrders()} className="mt-4">
+                        Retry
+                      </Button>
+                    </div>
+                  </div>
+                ) : isMobile ? (
+                  /* Mobile Card Layout */
+                  <div className="space-y-2.5 sm:space-y-3 pb-32">
+                    {getFilteredTrackingOrders().length === 0 ? (
+                      <div className="flex flex-col items-center justify-center py-12">
+                        <Truck className="w-16 h-16 text-gray-300 mb-4" />
+                        <p className="text-gray-600 font-medium">No orders in tracking yet</p>
+                        <p className="text-sm text-gray-500 mt-2">Orders will appear here 24 hours after handover</p>
+                      </div>
+                    ) : (
+                      getFilteredTrackingOrders().map((order, index) => (
+                        <Card 
+                          key={`${order.order_id}-${index}`} 
+                          className="p-2.5 sm:p-3 transition-colors"
+                        >
+                          <div className="space-y-1.5 sm:space-y-2">
+                            {/* Top Row: Order Info | Total */}
+                            <div className="flex items-center justify-between gap-1.5 sm:gap-2">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <h4 className="font-medium text-sm sm:text-base truncate">{order.order_id}</h4>
+                                  {(order.current_shipment_status || order.status) && (
+                                    <div className={`text-xs font-medium px-2 py-1 rounded-full ${getShipmentBadgeClasses(order.current_shipment_status || order.status)}`}>
+                                      {order.current_shipment_status || order.status}
+                                    </div>
+                                  )}
+                                </div>
+                                <p className="text-xs sm:text-sm text-gray-500 truncate">
+                                  {order.order_date ? new Date(order.order_date).toLocaleDateString() : "N/A"}
+                                </p>
+                                {order.products?.[0]?.awb && (
+                                  <p className="text-xs font-mono text-purple-600 truncate">
+                                    AWB: {order.products[0].awb}
+                                  </p>
+                                )}
+                              </div>
+                              {/* Total Count - Right aligned */}
+                              <div className="text-right flex-shrink-0">
+                                <div className="text-sm text-gray-500">Total</div>
+                                <div className="text-xl font-bold text-purple-600">{order.total_quantity || 0}</div>
+                              </div>
+                            </div>
+                            
+                            {/* Products List */}
+                            <div className="space-y-2">
+                              {order.products && order.products.map((product: any) => (
+                                <div key={product.unique_id} className="flex items-center gap-2 p-2 bg-gray-50 rounded-lg">
+                                  <img
+                                    src={product.image || product.product_image || "/placeholder.svg"}
+                                    alt={product.product_name}
+                                    className="w-10 h-10 rounded-md object-cover cursor-pointer"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      (product.image || product.product_image) && setSelectedImageProduct({url: product.image || product.product_image, title: product.product_name || "Product Image"})
+                                    }}
+                                    onError={(e) => {
+                                      e.currentTarget.src = "/placeholder.svg";
+                                    }}
+                                  />
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-xs font-medium break-words leading-relaxed">{product.product_name}</p>
+                                    <p className="text-xs text-gray-500 break-words leading-relaxed">Code: {product.product_code}</p>
+                                  </div>
+                                  <div className="text-right flex-shrink-0">
+                                    <p className="text-xs font-medium">{product.quantity || 0}</p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </Card>
+                      ))
+                    )}
+                  </div>
+                ) : (
+                  /* Desktop Table Layout */
+                  <div className="border rounded-lg overflow-hidden">
+                    <Table>
+                      <TableHeader className="sticky top-0 bg-white z-30 shadow-sm border-b">
+                        <TableRow>
+                          <TableHead className="font-semibold">Order ID</TableHead>
+                          <TableHead className="font-semibold">Order Date</TableHead>
+                          <TableHead className="font-semibold">Products</TableHead>
+                          <TableHead className="font-semibold">AWB Number</TableHead>
+                          <TableHead className="font-semibold text-center">Count</TableHead>
+                          <TableHead className="font-semibold">Shipment Status</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {getFilteredTrackingOrders().length === 0 ? (
+                          <TableRow>
+                            <TableCell colSpan={6} className="h-64 text-center">
+                              <div className="flex flex-col items-center justify-center">
+                                <Truck className="w-16 h-16 text-gray-300 mb-4" />
+                                <p className="text-gray-600 font-medium">No orders in tracking yet</p>
+                                <p className="text-sm text-gray-500 mt-2">Orders will appear here 24 hours after handover</p>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          getFilteredTrackingOrders().map((order, index) => (
+                            <TableRow key={`${order.order_id}-${index}`} className="hover:bg-gray-50">
+                              <TableCell className="font-medium">{order.order_id}</TableCell>
+                              <TableCell>
+                                {order.order_date ? (
+                                  <div className="flex flex-col">
+                                    <span className="text-sm font-medium">
+                                      {new Date(order.order_date).toLocaleDateString()}
+                                    </span>
+                                    <span className="text-xs text-gray-500">
+                                      {new Date(order.order_date).toLocaleTimeString()}
+                                    </span>
+                                  </div>
+                                ) : "N/A"}
+                              </TableCell>
+                              <TableCell>
+                                <div className="space-y-2">
+                                  {order.products && order.products.map((product: any, productIndex: number) => (
+                                    <div key={product.unique_id || productIndex} className="flex items-center gap-3">
+                                      <TooltipProvider>
+                                        <Tooltip>
+                                          <TooltipTrigger asChild>
+                                            <img
+                                              src={product.image || product.product_image || "/placeholder.svg"}
+                                              alt={product.product_name}
+                                              className="w-10 h-10 rounded-md object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                                              onClick={() => (product.image || product.product_image) && setSelectedImageProduct({url: product.image || product.product_image, title: product.product_name || "Product Image"})}
+                                              onError={(e) => {
+                                                e.currentTarget.src = "/placeholder.svg";
+                                              }}
+                                            />
+                                          </TooltipTrigger>
+                                          <TooltipContent>
+                                            <p>Click to view full image</p>
+                                          </TooltipContent>
+                                        </Tooltip>
+                                      </TooltipProvider>
+                                      <div className="flex-1 min-w-0">
+                                        <div className="font-medium text-sm break-words leading-relaxed">{product.product_name}</div>
+                                        <div className="text-xs text-gray-500 break-words">Code: {product.product_code}</div>
+                                      </div>
+                                      <div className="text-sm font-medium text-gray-700">
+                                        {product.quantity || 0}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                <div className="font-mono text-sm text-purple-600">
+                                  {order.products?.[0]?.awb || 'N/A'}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-center">
+                                <div className="text-base font-bold text-purple-600">
+                                  {order.total_quantity || 0}
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                {(order.current_shipment_status || order.status) ? (
+                                  <div className={`text-xs font-medium px-2 py-1 rounded-full inline-block ${getShipmentBadgeClasses(order.current_shipment_status || order.status)}`}>
+                                    {order.current_shipment_status || order.status}
+                                  </div>
+                                ) : (
+                                  <span className="text-sm font-medium text-gray-800">N/A</span>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          ))
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </TabsContent>
             </Tabs>
           </CardContent>
         </Card>
