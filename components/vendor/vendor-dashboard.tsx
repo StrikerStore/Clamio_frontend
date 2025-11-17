@@ -2665,7 +2665,23 @@ export function VendorDashboard() {
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
               {/* Fixed Controls Section */}
               <div className={`sticky ${isMobile ? 'top-16' : 'top-20'} bg-white z-40 pb-3 sm:pb-4 border-b mb-3 sm:mb-4`}>
-                <TabsList className={`grid w-full ${isMobile ? 'grid-cols-3' : 'grid-cols-4'} ${isMobile ? 'h-auto mb-3 sm:mb-4' : 'mb-6'}`}>
+                {/* Show Order Tracking header in mobile when viewing tracking */}
+                {isMobile && activeTab === "order-tracking" && (
+                  <div className="flex items-center justify-between mb-3">
+                    <h2 className="text-lg font-semibold text-gray-900">Order Tracking</h2>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setActiveTab("all-orders")}
+                      className="text-gray-500"
+                    >
+                      <X className="w-4 h-4" />
+                    </Button>
+                  </div>
+                )}
+                {/* Hide TabsList in mobile when viewing order-tracking since it's accessed via truck icon */}
+                {!(isMobile && activeTab === "order-tracking") && (
+                  <TabsList className={`grid w-full ${isMobile ? 'grid-cols-3' : 'grid-cols-4'} ${isMobile ? 'h-auto mb-3 sm:mb-4' : 'mb-6'}`}>
                   <TabsTrigger value="all-orders" className={`${isMobile ? 'text-xs sm:text-sm px-1.5 sm:px-2 py-2.5 sm:py-3' : ''}`}>
                     All ({getQuantitySumForTab("all-orders")})
                   </TabsTrigger>
@@ -2703,6 +2719,7 @@ export function VendorDashboard() {
                     </TabsTrigger>
                   )}
                 </TabsList>
+                )}
 
                 {/* Filters */}
                 <div className={`flex flex-col gap-2 mb-2 md:mb-3 ${!isMobile && 'sm:flex-row sm:items-center'}`}>
@@ -4091,7 +4108,7 @@ export function VendorDashboard() {
                   </div>
                 ) : isMobile ? (
                   /* Mobile Card Layout */
-                  <div className="space-y-2.5 sm:space-y-3 pb-32 mt-4">
+                  <div className="space-y-2.5 sm:space-y-3 pb-32">
                     {getFilteredTrackingOrders().length === 0 ? (
                       <div className="flex flex-col items-center justify-center py-12">
                         <Truck className="w-16 h-16 text-gray-300 mb-4" />
