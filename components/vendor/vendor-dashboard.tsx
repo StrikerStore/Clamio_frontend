@@ -228,6 +228,7 @@ export function VendorDashboard() {
   const [handoverOrdersHasMore, setHandoverOrdersHasMore] = useState(true);
   const [handoverOrdersTotalCount, setHandoverOrdersTotalCount] = useState(0);
   const [handoverOrdersTotalQuantity, setHandoverOrdersTotalQuantity] = useState(0);
+  const [isLoadingMoreHandover, setIsLoadingMoreHandover] = useState(false);
 
   // Order Tracking orders state
   const [trackingOrders, setTrackingOrders] = useState<any[]>([]);
@@ -237,6 +238,7 @@ export function VendorDashboard() {
   const [trackingOrdersHasMore, setTrackingOrdersHasMore] = useState(true);
   const [trackingOrdersTotalCount, setTrackingOrdersTotalCount] = useState(0);
   const [trackingOrdersTotalQuantity, setTrackingOrdersTotalQuantity] = useState(0);
+  const [isLoadingMoreTracking, setIsLoadingMoreTracking] = useState(false);
 
   // Settlement-related state
   const [payments, setPayments] = useState<{ currentPayment: number; futurePayment: number } | null>(null)
@@ -549,6 +551,8 @@ export function VendorDashboard() {
     if (resetPagination) {
       setHandoverOrdersLoading(true);
       setHandoverOrdersPage(1);
+    } else {
+      setIsLoadingMoreHandover(true);
     }
     
     setHandoverOrdersError("");
@@ -566,9 +570,21 @@ export function VendorDashboard() {
           setHandoverOrders(prev => [...prev, ...newOrders]);
         }
         
+        // Update pagination metadata
         setHandoverOrdersHasMore(response.data.pagination?.has_next || false);
-        setHandoverOrdersTotalCount(response.data.summary?.total_orders || 0);
-        setHandoverOrdersTotalQuantity(response.data.summary?.total_quantity || 0);
+        
+        // Always update total count from API (even if page is not fully loaded)
+        if (response.data.summary?.total_orders !== undefined) {
+          setHandoverOrdersTotalCount(response.data.summary.total_orders);
+        }
+        if (response.data.summary?.total_quantity !== undefined) {
+          setHandoverOrdersTotalQuantity(response.data.summary.total_quantity);
+        }
+        
+        // Increment page number when loading more
+        if (!resetPagination) {
+          setHandoverOrdersPage(prev => prev + 1);
+        }
       }
     } catch (err: any) {
       setHandoverOrdersError(err.message || "Failed to fetch handover orders");
@@ -577,6 +593,7 @@ export function VendorDashboard() {
       }
     } finally {
       setHandoverOrdersLoading(false);
+      setIsLoadingMoreHandover(false);
     }
   };
 
@@ -584,6 +601,8 @@ export function VendorDashboard() {
     if (resetPagination) {
       setTrackingOrdersLoading(true);
       setTrackingOrdersPage(1);
+    } else {
+      setIsLoadingMoreTracking(true);
     }
     
     setTrackingOrdersError("");
@@ -601,9 +620,21 @@ export function VendorDashboard() {
           setTrackingOrders(prev => [...prev, ...newOrders]);
         }
         
+        // Update pagination metadata
         setTrackingOrdersHasMore(response.data.pagination?.has_next || false);
-        setTrackingOrdersTotalCount(response.data.summary?.total_orders || 0);
-        setTrackingOrdersTotalQuantity(response.data.summary?.total_quantity || 0);
+        
+        // Always update total count from API (even if page is not fully loaded)
+        if (response.data.summary?.total_orders !== undefined) {
+          setTrackingOrdersTotalCount(response.data.summary.total_orders);
+        }
+        if (response.data.summary?.total_quantity !== undefined) {
+          setTrackingOrdersTotalQuantity(response.data.summary.total_quantity);
+        }
+        
+        // Increment page number when loading more
+        if (!resetPagination) {
+          setTrackingOrdersPage(prev => prev + 1);
+        }
       }
     } catch (err: any) {
       setTrackingOrdersError(err.message || "Failed to fetch order tracking orders");
@@ -612,6 +643,7 @@ export function VendorDashboard() {
       }
     } finally {
       setTrackingOrdersLoading(false);
+      setIsLoadingMoreTracking(false);
     }
   };
 
@@ -2138,19 +2170,28 @@ export function VendorDashboard() {
     }
   };
 
-  // Infinite scroll handler for My Orders
+  // Infinite scroll handler for all tabs
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    // Only apply infinite scroll for My Orders tab
-    if (activeTab !== 'my-orders') return;
-    
     const element = e.currentTarget;
     const scrolledToBottom = 
       element.scrollHeight - element.scrollTop <= element.clientHeight + 200;
     
-    // Load more when scrolled near bottom and there's more data
-    if (scrolledToBottom && groupedOrdersHasMore && !groupedOrdersLoading && !isLoadingMore) {
-      console.log('📜 Infinite scroll triggered - loading more orders...');
+    // Handle My Orders tab
+    if (activeTab === 'my-orders' && scrolledToBottom && groupedOrdersHasMore && !groupedOrdersLoading && !isLoadingMore) {
+      console.log('📜 Infinite scroll triggered - loading more My Orders...');
       fetchGroupedOrders(false); // false = don't reset pagination
+    }
+    
+    // Handle Handover tab
+    if (activeTab === 'handover' && scrolledToBottom && handoverOrdersHasMore && !handoverOrdersLoading && !isLoadingMoreHandover) {
+      console.log('📜 Infinite scroll triggered - loading more Handover orders...');
+      fetchHandoverOrders(false); // false = don't reset pagination
+    }
+    
+    // Handle Order Tracking tab
+    if (activeTab === 'order-tracking' && scrolledToBottom && trackingOrdersHasMore && !trackingOrdersLoading && !isLoadingMoreTracking) {
+      console.log('📜 Infinite scroll triggered - loading more Tracking orders...');
+      fetchOrderTrackingOrders(false); // false = don't reset pagination
     }
   };
 
@@ -3609,6 +3650,23 @@ export function VendorDashboard() {
                           </div>
                         </Card>
                       ))}
+                      
+                      {/* Loading More Indicator for Mobile Handover */}
+                      {isLoadingMoreHandover && (
+                        <div className="flex items-center justify-center p-4">
+                          <div className="text-center">
+                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-green-600 mx-auto mb-2"></div>
+                            <p className="text-xs text-gray-500">Loading more orders...</p>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* End of List Indicator for Mobile Handover */}
+                      {!handoverOrdersHasMore && handoverOrders.length > 0 && (
+                        <div className="flex items-center justify-center p-4">
+                          <p className="text-xs text-gray-400">All orders loaded ({handoverOrdersTotalCount} total)</p>
+                        </div>
+                      )}
                     </div>
                   ) : (
                     /* Desktop/Tablet Table Layout */
@@ -3776,6 +3834,23 @@ export function VendorDashboard() {
                         ))}
                       </TableBody>
                     </Table>
+                    
+                    {/* Loading More Indicator for Desktop Handover */}
+                    {isLoadingMoreHandover && (
+                      <div className="flex items-center justify-center p-6 border-t">
+                        <div className="text-center">
+                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600 mx-auto mb-2"></div>
+                          <p className="text-sm text-gray-500">Loading more orders...</p>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* End of List Indicator for Desktop Handover */}
+                    {!handoverOrdersHasMore && handoverOrders.length > 0 && (
+                      <div className="flex items-center justify-center p-4 border-t bg-gray-50">
+                        <p className="text-sm text-gray-500">All orders loaded ({handoverOrdersTotalCount} total)</p>
+                      </div>
+                    )}
                   </div>
                   )}
                 </TabsContent>
@@ -4070,6 +4145,23 @@ export function VendorDashboard() {
                         </Card>
                       ))
                     )}
+                    
+                    {/* Loading More Indicator for Mobile Order Tracking */}
+                    {isLoadingMoreTracking && (
+                      <div className="flex items-center justify-center p-4">
+                        <div className="text-center">
+                          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-purple-600 mx-auto mb-2"></div>
+                          <p className="text-xs text-gray-500">Loading more orders...</p>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* End of List Indicator for Mobile Order Tracking */}
+                    {!trackingOrdersHasMore && trackingOrders.length > 0 && (
+                      <div className="flex items-center justify-center p-4">
+                        <p className="text-xs text-gray-400">All orders loaded ({trackingOrdersTotalCount} total)</p>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   /* Desktop Table Layout */
@@ -4169,6 +4261,23 @@ export function VendorDashboard() {
                         )}
                       </TableBody>
                     </Table>
+                    
+                    {/* Loading More Indicator for Desktop Order Tracking */}
+                    {isLoadingMoreTracking && (
+                      <div className="flex items-center justify-center p-6 border-t">
+                        <div className="text-center">
+                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600 mx-auto mb-2"></div>
+                          <p className="text-sm text-gray-500">Loading more orders...</p>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* End of List Indicator for Desktop Order Tracking */}
+                    {!trackingOrdersHasMore && trackingOrders.length > 0 && (
+                      <div className="flex items-center justify-center p-4 border-t bg-gray-50">
+                        <p className="text-sm text-gray-500">All orders loaded ({trackingOrdersTotalCount} total)</p>
+                      </div>
+                    )}
                   </div>
                 )}
               </TabsContent>
