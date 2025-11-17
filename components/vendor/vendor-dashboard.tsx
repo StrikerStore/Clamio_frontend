@@ -4065,7 +4065,7 @@ export function VendorDashboard() {
               )}
               
               {/* Order Tracking Tab Content - Shows orders that have been in handover for 24+ hours */}
-              <TabsContent value="order-tracking" className="mt-0">
+              <TabsContent value="order-tracking" className={`mt-0 ${isMobile ? '-mt-3' : ''}`}>
                 {trackingOrdersLoading ? (
                   <div className="flex items-center justify-center py-12">
                     <div className="text-center">
