@@ -2182,6 +2182,10 @@ export function VendorDashboard() {
   };
 
   // Helper functions to calculate quantity sums for each tab (WITHOUT filters - for cards)
+  // IMPORTANT: 
+  // - All counts show PRODUCT totals (sum of quantities), not order counts
+  // - Cards ALWAYS show TOTAL (unfiltered) counts, regardless of any active filters
+  // - Example: 3 orders with one order having 3 products = 5 total products displayed
   const getTotalQuantitySumForTab = (tabName: string) => {
     if (tabName === "my-orders") {
       // For My Orders card, use the absolute total (no filtering applied)
@@ -2223,7 +2227,11 @@ export function VendorDashboard() {
     }
   };
 
-  // Helper functions to calculate quantity sums for each tab (WITH filters - for tab content)
+  // Helper functions to calculate quantity sums for each tab (WITH filters - for tab headers)
+  // IMPORTANT:
+  // - All counts show PRODUCT totals (sum of quantities), not order counts
+  // - When NO filters: Shows same total as card (synchronized)
+  // - When filters ARE applied: Shows FILTERED product count (different from card)
   const getQuantitySumForTab = (tabName: string) => {
     if (tabName === "my-orders") {
       const tabFilter = tabFilters[tabName as keyof typeof tabFilters];
@@ -2235,7 +2243,7 @@ export function VendorDashboard() {
       const hasFilters = hasSearchFilter || hasDateFilter || hasLabelFilter;
       
       if (!hasFilters) {
-        // No filters applied - use absolute total from API (all pages)
+        // No filters applied - use absolute total from API (all pages) - this matches the card
         console.log('🔢 TAB COUNT: No filters - using absolute total from API');
         return groupedOrdersTotalQuantity;
       } else {
@@ -2248,7 +2256,7 @@ export function VendorDashboard() {
         console.log('🔢 TAB COUNT: allGroupedOrders.length:', allGroupedOrders.length);
         console.log('🔢 TAB COUNT: groupedOrders.length:', groupedOrders.length);
         
-        // Calculate total quantity from filtered orders
+        // Calculate total quantity (product count) from filtered orders
         const filteredTotal = filteredOrders.reduce((sum, order) => {
           return sum + (order.total_quantity || 0);
         }, 0);
@@ -2257,50 +2265,75 @@ export function VendorDashboard() {
         return filteredTotal;
       }
     } else if (tabName === "handover") {
-      // For Handover tab, use filtered handover orders
-      const filteredOrders = getFilteredHandoverOrders();
+      const tabFilter = tabFilters["handover"];
       
-      // Calculate total quantity from filtered orders
-      const filteredTotal = filteredOrders.reduce((sum, order) => {
-        return sum + (order.total_quantity || 0);
-      }, 0);
+      // Check if any filters are applied
+      const hasSearchFilter = tabFilter.searchTerm.trim().length > 0;
+      const hasDateFilter = tabFilter.dateFrom || tabFilter.dateTo;
+      const hasStatusFilter = selectedStatuses.length > 0;
+      const hasFilters = hasSearchFilter || hasDateFilter || hasStatusFilter;
       
-      return filteredTotal;
+      if (!hasFilters) {
+        // No filters applied - use absolute total from API (matches the card)
+        return handoverOrdersTotalQuantity;
+      } else {
+        // Filters applied - calculate from filtered orders
+        const filteredOrders = getFilteredHandoverOrders();
+        
+        // Calculate total quantity (product count) from filtered orders
+        const filteredTotal = filteredOrders.reduce((sum, order) => {
+          return sum + (order.total_quantity || 0);
+        }, 0);
+        
+        return filteredTotal;
+      }
     } else if (tabName === "order-tracking") {
-      // For Order Tracking tab, use filtered tracking orders
-      const filteredOrders = getFilteredTrackingOrders();
+      const tabFilter = tabFilters["order-tracking"];
       
-      // Calculate total quantity from filtered orders
-      const filteredTotal = filteredOrders.reduce((sum, order) => {
-        return sum + (order.total_quantity || 0);
-      }, 0);
+      // Check if any filters are applied
+      const hasSearchFilter = tabFilter.searchTerm.trim().length > 0;
+      const hasDateFilter = tabFilter.dateFrom || tabFilter.dateTo;
+      const hasStatusFilter = selectedTrackingStatuses.length > 0;
+      const hasFilters = hasSearchFilter || hasDateFilter || hasStatusFilter;
       
-      return filteredTotal;
+      if (!hasFilters) {
+        // No filters applied - use absolute total from API (matches the card)
+        return trackingOrdersTotalQuantity;
+      } else {
+        // Filters applied - calculate from filtered orders
+        const filteredOrders = getFilteredTrackingOrders();
+        
+        // Calculate total quantity (product count) from filtered orders
+        const filteredTotal = filteredOrders.reduce((sum, order) => {
+          return sum + (order.total_quantity || 0);
+        }, 0);
+        
+        return filteredTotal;
+      }
     } else {
       // For All Orders tab, show filtered results (applies search, date filters)
       const filteredOrders = getFilteredOrdersForTab(tabName);
-      console.log('🔍 ALL ORDERS TAB DEBUG:');
-      console.log('  - Tab name:', tabName);
-      console.log('  - Filtered orders count:', filteredOrders.length);
-      console.log('  - Tab total quantity:', filteredOrders.reduce((sum, order) => {
-        return sum + (order.quantity || 0);
-      }, 0));
-      
-      // Debug: Check if there are any active filters
       const tabFilter = tabFilters[tabName as keyof typeof tabFilters];
-      console.log('  - Active filters:');
-      console.log('    - Search term:', tabFilter.searchTerm);
-      console.log('    - Date from:', tabFilter.dateFrom);
-      console.log('    - Date to:', tabFilter.dateTo);
       
-      // Debug: Compare with unfiltered count
-      const unfilteredUnclaimed = orders.filter(order => order.status === 'unclaimed');
-      console.log('  - Unfiltered unclaimed orders:', unfilteredUnclaimed.length);
-      console.log('  - Difference:', unfilteredUnclaimed.length - filteredOrders.length);
+      // Check if any filters are applied
+      const hasSearchFilter = tabFilter.searchTerm.trim().length > 0;
+      const hasDateFilter = tabFilter.dateFrom || tabFilter.dateTo;
+      const hasFilters = hasSearchFilter || hasDateFilter;
       
-      return filteredOrders.reduce((sum, order) => {
-        return sum + (order.quantity || 0);
-      }, 0);
+      if (!hasFilters) {
+        // No filters applied - use the same calculation as the card
+        const unclaimedOrders = orders.filter(order => order.status === 'unclaimed');
+        const uniqueUnclaimedOrders = ensureUniqueOrders(unclaimedOrders, 'unique_id');
+        return uniqueUnclaimedOrders.reduce((sum, order) => {
+          return sum + (order.quantity || 0);
+        }, 0);
+      } else {
+        // Filters applied - calculate from filtered orders
+        // Calculate total quantity (product count) from filtered orders
+        return filteredOrders.reduce((sum, order) => {
+          return sum + (order.quantity || 0);
+        }, 0);
+      }
     }
   };
 
