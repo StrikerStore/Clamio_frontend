@@ -230,15 +230,12 @@ export function VendorDashboard() {
   const [handoverOrdersTotalQuantity, setHandoverOrdersTotalQuantity] = useState(0);
   const [isLoadingMoreHandover, setIsLoadingMoreHandover] = useState(false);
 
-  // Order Tracking orders state
+  // Order Tracking orders state (no pagination - loads all orders at once)
   const [trackingOrders, setTrackingOrders] = useState<any[]>([]);
   const [trackingOrdersLoading, setTrackingOrdersLoading] = useState(true);
   const [trackingOrdersError, setTrackingOrdersError] = useState("");
-  const [trackingOrdersPage, setTrackingOrdersPage] = useState(1);
-  const [trackingOrdersHasMore, setTrackingOrdersHasMore] = useState(true);
   const [trackingOrdersTotalCount, setTrackingOrdersTotalCount] = useState(0);
   const [trackingOrdersTotalQuantity, setTrackingOrdersTotalQuantity] = useState(0);
-  const [isLoadingMoreTracking, setIsLoadingMoreTracking] = useState(false);
 
   // Settlement-related state
   const [payments, setPayments] = useState<{ currentPayment: number; futurePayment: number } | null>(null)
@@ -602,55 +599,30 @@ export function VendorDashboard() {
     }
   };
 
-  const fetchOrderTrackingOrders = async (resetPagination: boolean = true) => {
-    if (resetPagination) {
-      setTrackingOrdersLoading(true);
-      setTrackingOrdersPage(1);
-    } else {
-      setIsLoadingMoreTracking(true);
-    }
-    
+  const fetchOrderTrackingOrders = async () => {
+    setTrackingOrdersLoading(true);
     setTrackingOrdersError("");
     
     try {
-      const page = resetPagination ? 1 : trackingOrdersPage;
-      const response = await apiClient.getOrderTrackingOrders(page, 50);
+      const response = await apiClient.getOrderTrackingOrders();
       
       if (response.success && response.data) {
-        const newOrders = response.data.trackingOrders || [];
+        const allOrders = response.data.trackingOrders || [];
+        setTrackingOrders(allOrders);
         
-        if (resetPagination) {
-          setTrackingOrders(newOrders);
-        } else {
-          setTrackingOrders(prev => [...prev, ...newOrders]);
-        }
-        
-        // Update pagination metadata
-        setTrackingOrdersHasMore(response.data.pagination?.has_next || false);
-        
-        // Always update total count from API (even if page is not fully loaded)
+        // Update summary data
         if (response.data.summary?.total_orders !== undefined) {
           setTrackingOrdersTotalCount(response.data.summary.total_orders);
         }
         if (response.data.summary?.total_quantity !== undefined) {
           setTrackingOrdersTotalQuantity(response.data.summary.total_quantity);
         }
-        
-        // Increment page number for next load
-        if (resetPagination) {
-          setTrackingOrdersPage(2); // Set to 2 after initial load
-        } else {
-          setTrackingOrdersPage(prev => prev + 1);
-        }
       }
     } catch (err: any) {
       setTrackingOrdersError(err.message || "Failed to fetch order tracking orders");
-      if (resetPagination) {
-        setTrackingOrders([]);
-      }
+      setTrackingOrders([]);
     } finally {
       setTrackingOrdersLoading(false);
-      setIsLoadingMoreTracking(false);
     }
   };
 
@@ -2197,11 +2169,7 @@ export function VendorDashboard() {
       fetchHandoverOrders(false); // false = don't reset pagination
     }
     
-    // Handle Order Tracking tab
-    if (activeTab === 'order-tracking' && scrolledToBottom && trackingOrdersHasMore && !trackingOrdersLoading && !isLoadingMoreTracking) {
-      console.log('📜 Infinite scroll triggered - loading more Tracking orders...');
-      fetchOrderTrackingOrders(false); // false = don't reset pagination
-    }
+    // Order Tracking tab loads all orders at once, no infinite scroll needed
   };
 
   // Helper function to trigger tab highlight animation
@@ -4155,20 +4123,10 @@ export function VendorDashboard() {
                       ))
                     )}
                     
-                    {/* Loading More Indicator for Mobile Order Tracking */}
-                    {isLoadingMoreTracking && (
+                    {/* Total count indicator for Order Tracking */}
+                    {trackingOrders.length > 0 && (
                       <div className="flex items-center justify-center p-4">
-                        <div className="text-center">
-                          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-purple-600 mx-auto mb-2"></div>
-                          <p className="text-xs text-gray-500">Loading more orders...</p>
-                        </div>
-                      </div>
-                    )}
-                    
-                    {/* End of List Indicator for Mobile Order Tracking */}
-                    {!trackingOrdersHasMore && trackingOrders.length > 0 && (
-                      <div className="flex items-center justify-center p-4">
-                        <p className="text-xs text-gray-400">All orders loaded ({trackingOrdersTotalCount} total)</p>
+                        <p className="text-xs text-gray-400">Showing all {trackingOrdersTotalCount} orders</p>
                       </div>
                     )}
                   </div>
@@ -4271,20 +4229,10 @@ export function VendorDashboard() {
                       </TableBody>
                     </Table>
                     
-                    {/* Loading More Indicator for Desktop Order Tracking */}
-                    {isLoadingMoreTracking && (
-                      <div className="flex items-center justify-center p-6 border-t">
-                        <div className="text-center">
-                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600 mx-auto mb-2"></div>
-                          <p className="text-sm text-gray-500">Loading more orders...</p>
-                        </div>
-                      </div>
-                    )}
-                    
-                    {/* End of List Indicator for Desktop Order Tracking */}
-                    {!trackingOrdersHasMore && trackingOrders.length > 0 && (
+                    {/* Total count indicator for Desktop Order Tracking */}
+                    {trackingOrders.length > 0 && (
                       <div className="flex items-center justify-center p-4 border-t bg-gray-50">
-                        <p className="text-sm text-gray-500">All orders loaded ({trackingOrdersTotalCount} total)</p>
+                        <p className="text-sm text-gray-500">Showing all {trackingOrdersTotalCount} orders</p>
                       </div>
                     )}
                   </div>
