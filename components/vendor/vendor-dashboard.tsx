@@ -229,6 +229,9 @@ export function VendorDashboard() {
   const [handoverOrdersTotalCount, setHandoverOrdersTotalCount] = useState(0);
   const [handoverOrdersTotalQuantity, setHandoverOrdersTotalQuantity] = useState(0);
   const [isLoadingMoreHandover, setIsLoadingMoreHandover] = useState(false);
+  // Store all handover orders (all pages) for filtered count calculation
+  const [allHandoverOrders, setAllHandoverOrders] = useState<any[]>([]);
+  const [isLoadingAllHandoverOrders, setIsLoadingAllHandoverOrders] = useState(false);
 
   // Order Tracking orders state (no pagination - loads all orders at once)
   const [trackingOrders, setTrackingOrders] = useState<any[]>([]);
@@ -488,6 +491,41 @@ export function VendorDashboard() {
     }
   };
 
+  // Fetch all handover orders (all pages) for filtered count calculation
+  const fetchAllHandoverOrders = async () => {
+    setIsLoadingAllHandoverOrders(true);
+    try {
+      let allOrders: any[] = [];
+      let page = 1;
+      let hasMore = true;
+      
+      while (hasMore) {
+        const response = await apiClient.getHandoverOrders(page, 50);
+        
+        if (response.success && response.data && Array.isArray(response.data.handoverOrders)) {
+          allOrders = [...allOrders, ...response.data.handoverOrders];
+          
+          if (response.data.pagination) {
+            hasMore = response.data.pagination.has_next || false;
+            page++;
+          } else {
+            hasMore = false;
+          }
+        } else {
+          hasMore = false;
+        }
+      }
+      
+      console.log('✅ Fetched all handover orders:', allOrders.length);
+      setAllHandoverOrders(allOrders);
+    } catch (err: any) {
+      console.error('❌ Error fetching all handover orders:', err);
+      setAllHandoverOrders([]);
+    } finally {
+      setIsLoadingAllHandoverOrders(false);
+    }
+  };
+
   const fetchGroupedOrders = async (resetPagination: boolean = true) => {
     if (resetPagination) {
       setGroupedOrdersLoading(true);
@@ -656,6 +694,30 @@ export function VendorDashboard() {
       setAllGroupedOrders([]);
     }
   }, [activeTab, tabFilters["my-orders"].searchTerm, tabFilters["my-orders"].dateFrom, tabFilters["my-orders"].dateTo, selectedLabelFilter]);
+
+  // Fetch all orders when filters are applied on Handover tab
+  useEffect(() => {
+    if (activeTab !== "handover") {
+      // Clear all orders when not on handover tab to save memory
+      setAllHandoverOrders([]);
+      return;
+    }
+
+    const tabFilter = tabFilters["handover"];
+    const hasSearchFilter = tabFilter.searchTerm.trim().length > 0;
+    const hasDateFilter = tabFilter.dateFrom || tabFilter.dateTo;
+    const hasStatusFilter = selectedStatuses.length > 0;
+    const hasFilters = hasSearchFilter || hasDateFilter || hasStatusFilter;
+
+    if (hasFilters && !isLoadingAllHandoverOrders && allHandoverOrders.length === 0) {
+      // Fetch all orders when filters are applied and we don't have them yet
+      console.log('🔍 Filters applied - fetching all handover orders for filtered count');
+      fetchAllHandoverOrders();
+    } else if (!hasFilters && allHandoverOrders.length > 0) {
+      // Clear all orders when filters are removed to save memory
+      setAllHandoverOrders([]);
+    }
+  }, [activeTab, tabFilters["handover"].searchTerm, tabFilters["handover"].dateFrom, tabFilters["handover"].dateTo, selectedStatuses]);
 
   // Real-time polling for order updates
   useEffect(() => {
@@ -1344,8 +1406,11 @@ export function VendorDashboard() {
   }
 
   // Filter handover orders based on search/date/status filters
+  // Uses allHandoverOrders (all pages) if available, otherwise uses handoverOrders (current page)
   const getFilteredHandoverOrders = () => {
-    let filtered = [...handoverOrders];
+    // Use all orders if available (when filters are applied), otherwise use current page
+    const baseOrders = allHandoverOrders.length > 0 ? allHandoverOrders : handoverOrders;
+    let filtered = [...baseOrders];
     const tabFilter = tabFilters["handover"];
     
     // Apply status filter if any statuses are selected
@@ -2185,6 +2250,7 @@ export function VendorDashboard() {
   // IMPORTANT: 
   // - All counts show PRODUCT totals (sum of quantities), not order counts
   // - Cards ALWAYS show TOTAL (unfiltered) counts, regardless of any active filters
+  // - Uses API totals which include ALL pages (irrespective of pagination)
   // - Example: 3 orders with one order having 3 products = 5 total products displayed
   const getTotalQuantitySumForTab = (tabName: string) => {
     if (tabName === "my-orders") {
@@ -2230,8 +2296,13 @@ export function VendorDashboard() {
   // Helper functions to calculate quantity sums for each tab (WITH filters - for tab headers)
   // IMPORTANT:
   // - All counts show PRODUCT totals (sum of quantities), not order counts
-  // - When NO filters: Shows same total as card (synchronized)
+  // - When NO filters: Shows same total as card (synchronized) - uses API totals (ALL pages)
   // - When filters ARE applied: Shows FILTERED product count (different from card)
+  //   - My Orders: Uses allGroupedOrders (all pages) when filters applied
+  //   - Handover: Uses allHandoverOrders (all pages) when filters applied
+  //   - Order Tracking: Uses all orders (no pagination) - already has all orders
+  //   - All Orders: Uses all orders (no pagination) - already has all orders
+  // - All tabs now show counts from ALL applicable orders across all pages, regardless of pagination
   const getQuantitySumForTab = (tabName: string) => {
     if (tabName === "my-orders") {
       const tabFilter = tabFilters[tabName as keyof typeof tabFilters];
@@ -2250,18 +2321,18 @@ export function VendorDashboard() {
         // Filters applied - use all orders if available, otherwise use loaded pages
         const useAllOrders = allGroupedOrders.length > 0;
         const filteredOrders = getFilteredGroupedOrdersForTab(tabName, useAllOrders);
-        console.log('🔢 TAB COUNT: Filters applied - calculating from filtered orders');
-        console.log('🔢 TAB COUNT: Using all orders:', useAllOrders);
-        console.log('🔢 TAB COUNT: filteredOrders.length:', filteredOrders.length);
-        console.log('🔢 TAB COUNT: allGroupedOrders.length:', allGroupedOrders.length);
-        console.log('🔢 TAB COUNT: groupedOrders.length:', groupedOrders.length);
+        console.log('🔢 MY ORDERS TAB COUNT: Filters applied - calculating from filtered orders');
+        console.log('🔢 MY ORDERS TAB COUNT: Using all orders:', useAllOrders);
+        console.log('🔢 MY ORDERS TAB COUNT: filteredOrders.length:', filteredOrders.length);
+        console.log('🔢 MY ORDERS TAB COUNT: allGroupedOrders.length:', allGroupedOrders.length);
+        console.log('🔢 MY ORDERS TAB COUNT: groupedOrders.length:', groupedOrders.length);
         
-        // Calculate total quantity (product count) from filtered orders
+        // Calculate total quantity (product count) from filtered orders (all applicable pages)
         const filteredTotal = filteredOrders.reduce((sum, order) => {
           return sum + (order.total_quantity || 0);
         }, 0);
         
-        console.log('🔢 TAB COUNT: Filtered total quantity:', filteredTotal);
+        console.log('🔢 MY ORDERS TAB COUNT: Filtered total quantity:', filteredTotal);
         return filteredTotal;
       }
     } else if (tabName === "handover") {
@@ -2274,17 +2345,25 @@ export function VendorDashboard() {
       const hasFilters = hasSearchFilter || hasDateFilter || hasStatusFilter;
       
       if (!hasFilters) {
-        // No filters applied - use absolute total from API (matches the card)
+        // No filters applied - use absolute total from API (matches the card) - all pages
         return handoverOrdersTotalQuantity;
       } else {
-        // Filters applied - calculate from filtered orders
+        // Filters applied - use all orders if available, otherwise use loaded pages
+        const useAllOrders = allHandoverOrders.length > 0;
         const filteredOrders = getFilteredHandoverOrders();
+        
+        console.log('🔢 HANDOVER TAB COUNT: Filters applied - calculating from filtered orders');
+        console.log('🔢 HANDOVER TAB COUNT: Using all orders:', useAllOrders);
+        console.log('🔢 HANDOVER TAB COUNT: allHandoverOrders.length:', allHandoverOrders.length);
+        console.log('🔢 HANDOVER TAB COUNT: handoverOrders.length:', handoverOrders.length);
+        console.log('🔢 HANDOVER TAB COUNT: filteredOrders.length:', filteredOrders.length);
         
         // Calculate total quantity (product count) from filtered orders
         const filteredTotal = filteredOrders.reduce((sum, order) => {
           return sum + (order.total_quantity || 0);
         }, 0);
         
+        console.log('🔢 HANDOVER TAB COUNT: Filtered total quantity:', filteredTotal);
         return filteredTotal;
       }
     } else if (tabName === "order-tracking") {
