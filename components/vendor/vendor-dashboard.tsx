@@ -893,7 +893,7 @@ export function VendorDashboard() {
 
     try {
       // Get filtered orders for handover tab
-      const handoverOrders = getFilteredOrdersForTab("handover");
+      const handoverOrders = getFilteredHandoverOrders();
       
       // Extract unique manifest_ids from selected orders
       const uniqueManifestIds = new Set<string>();
@@ -1379,7 +1379,7 @@ export function VendorDashboard() {
     // Apply status filter if any statuses are selected
     if (selectedStatuses.length > 0) {
       filtered = filtered.filter(order => 
-        selectedStatuses.includes(order.status)
+        selectedStatuses.includes(order.current_shipment_status || order.status)
       );
     }
     
@@ -1389,6 +1389,8 @@ export function VendorDashboard() {
       filtered = filtered.filter(order => {
         const orderId = String(order.order_id || '').toLowerCase();
         const customer = String(order.customer_name || '').toLowerCase();
+        const manifestId = String(order.manifest_id || '').toLowerCase();
+        const awb = String(order.products?.[0]?.awb || '').toLowerCase();
         
         // Search through products array
         if (Array.isArray(order.products) && order.products.length > 0) {
@@ -1397,9 +1399,9 @@ export function VendorDashboard() {
             const sku = String(product.product_code || '').toLowerCase();
             return name.includes(term) || sku.includes(term);
           });
-          return orderId.includes(term) || customer.includes(term) || productMatch;
+          return orderId.includes(term) || customer.includes(term) || manifestId.includes(term) || awb.includes(term) || productMatch;
         }
-        return orderId.includes(term) || customer.includes(term);
+        return orderId.includes(term) || customer.includes(term) || manifestId.includes(term) || awb.includes(term);
       });
     }
     
@@ -3521,7 +3523,7 @@ export function VendorDashboard() {
                   {/* Mobile Card Layout */}
                   {isMobile ? (
                     <div className="space-y-2.5 sm:space-y-3 pb-32">
-                      {getFilteredOrdersForTab("handover").map((order, index) => (
+                      {getFilteredHandoverOrders().map((order, index) => (
                         <Card 
                           key={`${order.order_id}-${index}`} 
                           className="p-2.5 sm:p-3 cursor-pointer transition-colors hover:bg-gray-50"
@@ -3684,10 +3686,10 @@ export function VendorDashboard() {
                           <TableHead className="w-12">
                             <input
                               type="checkbox"
-                              checked={selectedHandoverOrders.length === getFilteredOrdersForTab("handover").length && getFilteredOrdersForTab("handover").length > 0}
+                              checked={selectedHandoverOrders.length === getFilteredHandoverOrders().length && getFilteredHandoverOrders().length > 0}
                               onChange={(e) => {
                                 if (e.target.checked) {
-                                  setSelectedHandoverOrders(getFilteredOrdersForTab("handover").map((o: any) => o.order_id));
+                                  setSelectedHandoverOrders(getFilteredHandoverOrders().map((o: any) => o.order_id));
                                 } else {
                                   setSelectedHandoverOrders([]);
                                 }
@@ -3704,7 +3706,7 @@ export function VendorDashboard() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {getFilteredOrdersForTab("handover").map((order, index) => (
+                        {getFilteredHandoverOrders().map((order, index) => (
                           <TableRow key={`${order.order_id}-${index}`}>
                             <TableCell>
                               <input
@@ -3998,7 +4000,7 @@ export function VendorDashboard() {
                         <input
                           type="checkbox"
                           onChange={(e) => {
-                            const handoverOrders = getFilteredOrdersForTab("handover")
+                            const handoverOrders = getFilteredHandoverOrders()
                             if (e.target.checked) {
                               setSelectedHandoverOrders(handoverOrders.map((o) => o.order_id))
                             } else {
@@ -4007,7 +4009,7 @@ export function VendorDashboard() {
                           }}
                           checked={
                             selectedHandoverOrders.length > 0 &&
-                            selectedHandoverOrders.length === getFilteredOrdersForTab("handover").length
+                            selectedHandoverOrders.length === getFilteredHandoverOrders().length
                           }
                           className="w-3.5 h-3.5 sm:w-4 sm:h-4"
                         />
