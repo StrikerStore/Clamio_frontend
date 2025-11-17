@@ -229,9 +229,6 @@ export function VendorDashboard() {
   const [handoverOrdersTotalCount, setHandoverOrdersTotalCount] = useState(0);
   const [handoverOrdersTotalQuantity, setHandoverOrdersTotalQuantity] = useState(0);
   const [isLoadingMoreHandover, setIsLoadingMoreHandover] = useState(false);
-  // Store all handover orders (all pages) for filtered count calculation
-  const [allHandoverOrders, setAllHandoverOrders] = useState<any[]>([]);
-  const [isLoadingAllHandoverOrders, setIsLoadingAllHandoverOrders] = useState(false);
 
   // Order Tracking orders state (no pagination - loads all orders at once)
   const [trackingOrders, setTrackingOrders] = useState<any[]>([]);
@@ -491,41 +488,6 @@ export function VendorDashboard() {
     }
   };
 
-  // Fetch all handover orders (all pages) for filtered count calculation
-  const fetchAllHandoverOrders = async () => {
-    setIsLoadingAllHandoverOrders(true);
-    try {
-      let allOrders: any[] = [];
-      let page = 1;
-      let hasMore = true;
-      
-      while (hasMore) {
-        const response = await apiClient.getHandoverOrders(page, 50);
-        
-        if (response.success && response.data && Array.isArray(response.data.handoverOrders)) {
-          allOrders = [...allOrders, ...response.data.handoverOrders];
-          
-          if (response.data.pagination) {
-            hasMore = response.data.pagination.has_next || false;
-            page++;
-          } else {
-            hasMore = false;
-          }
-        } else {
-          hasMore = false;
-        }
-      }
-      
-      console.log('✅ Fetched all handover orders:', allOrders.length);
-      setAllHandoverOrders(allOrders);
-    } catch (err: any) {
-      console.error('❌ Error fetching all handover orders:', err);
-      setAllHandoverOrders([]);
-    } finally {
-      setIsLoadingAllHandoverOrders(false);
-    }
-  };
-
   const fetchGroupedOrders = async (resetPagination: boolean = true) => {
     if (resetPagination) {
       setGroupedOrdersLoading(true);
@@ -694,30 +656,6 @@ export function VendorDashboard() {
       setAllGroupedOrders([]);
     }
   }, [activeTab, tabFilters["my-orders"].searchTerm, tabFilters["my-orders"].dateFrom, tabFilters["my-orders"].dateTo, selectedLabelFilter]);
-
-  // Fetch all orders when filters are applied on Handover tab
-  useEffect(() => {
-    if (activeTab !== "handover") {
-      // Clear all orders when not on handover tab to save memory
-      setAllHandoverOrders([]);
-      return;
-    }
-
-    const tabFilter = tabFilters["handover"];
-    const hasSearchFilter = tabFilter.searchTerm.trim().length > 0;
-    const hasDateFilter = tabFilter.dateFrom || tabFilter.dateTo;
-    const hasStatusFilter = selectedStatuses.length > 0;
-    const hasFilters = hasSearchFilter || hasDateFilter || hasStatusFilter;
-
-    if (hasFilters && !isLoadingAllHandoverOrders && allHandoverOrders.length === 0) {
-      // Fetch all orders when filters are applied and we don't have them yet
-      console.log('🔍 Filters applied - fetching all handover orders for filtered count');
-      fetchAllHandoverOrders();
-    } else if (!hasFilters && allHandoverOrders.length > 0) {
-      // Clear all orders when filters are removed to save memory
-      setAllHandoverOrders([]);
-    }
-  }, [activeTab, tabFilters["handover"].searchTerm, tabFilters["handover"].dateFrom, tabFilters["handover"].dateTo, selectedStatuses]);
 
   // Real-time polling for order updates
   useEffect(() => {
@@ -1406,11 +1344,8 @@ export function VendorDashboard() {
   }
 
   // Filter handover orders based on search/date/status filters
-  // Uses allHandoverOrders (all pages) if available, otherwise uses handoverOrders (current page)
   const getFilteredHandoverOrders = () => {
-    // Use all orders if available (when filters are applied), otherwise use current page
-    const baseOrders = allHandoverOrders.length > 0 ? allHandoverOrders : handoverOrders;
-    let filtered = [...baseOrders];
+    let filtered = [...handoverOrders];
     const tabFilter = tabFilters["handover"];
     
     // Apply status filter if any statuses are selected
@@ -2250,7 +2185,6 @@ export function VendorDashboard() {
   // IMPORTANT: 
   // - All counts show PRODUCT totals (sum of quantities), not order counts
   // - Cards ALWAYS show TOTAL (unfiltered) counts, regardless of any active filters
-  // - Uses API totals which include ALL pages (irrespective of pagination)
   // - Example: 3 orders with one order having 3 products = 5 total products displayed
   const getTotalQuantitySumForTab = (tabName: string) => {
     if (tabName === "my-orders") {
@@ -2296,13 +2230,8 @@ export function VendorDashboard() {
   // Helper functions to calculate quantity sums for each tab (WITH filters - for tab headers)
   // IMPORTANT:
   // - All counts show PRODUCT totals (sum of quantities), not order counts
-  // - When NO filters: Shows same total as card (synchronized) - uses API totals (ALL pages)
+  // - When NO filters: Shows same total as card (synchronized)
   // - When filters ARE applied: Shows FILTERED product count (different from card)
-  //   - My Orders: Uses allGroupedOrders (all pages) when filters applied
-  //   - Handover: Uses allHandoverOrders (all pages) when filters applied
-  //   - Order Tracking: Uses all orders (no pagination) - already has all orders
-  //   - All Orders: Uses all orders (no pagination) - already has all orders
-  // - All tabs now show counts from ALL applicable orders across all pages, regardless of pagination
   const getQuantitySumForTab = (tabName: string) => {
     if (tabName === "my-orders") {
       const tabFilter = tabFilters[tabName as keyof typeof tabFilters];
@@ -2321,18 +2250,18 @@ export function VendorDashboard() {
         // Filters applied - use all orders if available, otherwise use loaded pages
         const useAllOrders = allGroupedOrders.length > 0;
         const filteredOrders = getFilteredGroupedOrdersForTab(tabName, useAllOrders);
-        console.log('🔢 MY ORDERS TAB COUNT: Filters applied - calculating from filtered orders');
-        console.log('🔢 MY ORDERS TAB COUNT: Using all orders:', useAllOrders);
-        console.log('🔢 MY ORDERS TAB COUNT: filteredOrders.length:', filteredOrders.length);
-        console.log('🔢 MY ORDERS TAB COUNT: allGroupedOrders.length:', allGroupedOrders.length);
-        console.log('🔢 MY ORDERS TAB COUNT: groupedOrders.length:', groupedOrders.length);
+        console.log('🔢 TAB COUNT: Filters applied - calculating from filtered orders');
+        console.log('🔢 TAB COUNT: Using all orders:', useAllOrders);
+        console.log('🔢 TAB COUNT: filteredOrders.length:', filteredOrders.length);
+        console.log('🔢 TAB COUNT: allGroupedOrders.length:', allGroupedOrders.length);
+        console.log('🔢 TAB COUNT: groupedOrders.length:', groupedOrders.length);
         
-        // Calculate total quantity (product count) from filtered orders (all applicable pages)
+        // Calculate total quantity (product count) from filtered orders
         const filteredTotal = filteredOrders.reduce((sum, order) => {
           return sum + (order.total_quantity || 0);
         }, 0);
         
-        console.log('🔢 MY ORDERS TAB COUNT: Filtered total quantity:', filteredTotal);
+        console.log('🔢 TAB COUNT: Filtered total quantity:', filteredTotal);
         return filteredTotal;
       }
     } else if (tabName === "handover") {
@@ -2345,25 +2274,17 @@ export function VendorDashboard() {
       const hasFilters = hasSearchFilter || hasDateFilter || hasStatusFilter;
       
       if (!hasFilters) {
-        // No filters applied - use absolute total from API (matches the card) - all pages
+        // No filters applied - use absolute total from API (matches the card)
         return handoverOrdersTotalQuantity;
       } else {
-        // Filters applied - use all orders if available, otherwise use loaded pages
-        const useAllOrders = allHandoverOrders.length > 0;
+        // Filters applied - calculate from filtered orders
         const filteredOrders = getFilteredHandoverOrders();
-        
-        console.log('🔢 HANDOVER TAB COUNT: Filters applied - calculating from filtered orders');
-        console.log('🔢 HANDOVER TAB COUNT: Using all orders:', useAllOrders);
-        console.log('🔢 HANDOVER TAB COUNT: allHandoverOrders.length:', allHandoverOrders.length);
-        console.log('🔢 HANDOVER TAB COUNT: handoverOrders.length:', handoverOrders.length);
-        console.log('🔢 HANDOVER TAB COUNT: filteredOrders.length:', filteredOrders.length);
         
         // Calculate total quantity (product count) from filtered orders
         const filteredTotal = filteredOrders.reduce((sum, order) => {
           return sum + (order.total_quantity || 0);
         }, 0);
         
-        console.log('🔢 HANDOVER TAB COUNT: Filtered total quantity:', filteredTotal);
         return filteredTotal;
       }
     } else if (tabName === "order-tracking") {
@@ -2743,8 +2664,8 @@ export function VendorDashboard() {
           <CardContent className="p-2 sm:p-4 md:p-6">
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
               {/* Fixed Controls Section */}
-              <div className={`sticky ${isMobile ? 'top-16' : 'top-20'} bg-white z-40 pb-3 sm:pb-4 border-b ${isMobile && activeTab === 'order-tracking' ? 'mb-0' : 'mb-3 sm:mb-4'}`}>
-                <TabsList className={`grid w-full ${isMobile ? 'grid-cols-3' : 'grid-cols-4'} ${isMobile ? `h-auto ${activeTab === 'order-tracking' ? 'mb-1' : 'mb-3 sm:mb-4'}` : 'mb-6'}`}>
+              <div className={`sticky ${isMobile ? 'top-16' : 'top-20'} bg-white z-40 pb-3 sm:pb-4 border-b mb-3 sm:mb-4`}>
+                <TabsList className={`grid w-full ${isMobile ? 'grid-cols-3' : 'grid-cols-4'} ${isMobile ? 'h-auto mb-3 sm:mb-4' : 'mb-6'}`}>
                   <TabsTrigger value="all-orders" className={`${isMobile ? 'text-xs sm:text-sm px-1.5 sm:px-2 py-2.5 sm:py-3' : ''}`}>
                     All ({getQuantitySumForTab("all-orders")})
                   </TabsTrigger>
@@ -2784,7 +2705,7 @@ export function VendorDashboard() {
                 </TabsList>
 
                 {/* Filters */}
-                <div className={`flex flex-col gap-2 ${isMobile && activeTab === 'order-tracking' ? 'mb-0' : 'mb-2 md:mb-3'} ${!isMobile && 'sm:flex-row sm:items-center'}`}>
+                <div className={`flex flex-col gap-2 mb-2 md:mb-3 ${!isMobile && 'sm:flex-row sm:items-center'}`}>
                   <div className="flex-1 min-w-[200px]">
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
@@ -4026,18 +3947,22 @@ export function VendorDashboard() {
                       <Button 
                         onClick={() => handleBulkDownloadLabels("my-orders")}
                         disabled={selectedMyOrders.length === 0 || bulkDownloadLoading}
-                        className="flex-1 h-10 sm:h-12 text-sm sm:text-lg font-medium bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg min-w-0"
+                        className="flex-1 h-10 sm:h-12 text-xs sm:text-sm md:text-base font-medium bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg min-w-0 px-2 sm:px-3"
                       >
                         {bulkDownloadLoading ? (
                           <>
                             <div className={`animate-spin rounded-full border-b-2 border-white ${isMobile ? 'h-3 w-3 mr-1 sm:h-4 sm:w-4 sm:mr-2' : 'h-4 w-4 mr-2'}`}></div>
-                            <span className="truncate">{isMobile ? 'Loading' : 'Generating...'}</span>
+                            <span className="whitespace-nowrap">{isMobile ? 'Loading' : 'Generating...'}</span>
                           </>
                         ) : (
-                          <>
-                            <Download className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2 flex-shrink-0" />
-                            <span className="truncate">Download ({selectedMyOrders.length})</span>
-                          </>
+                          <div className="flex items-center justify-center w-full">
+                            <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5 mr-1 sm:mr-1.5 flex-shrink-0" />
+                            <span className="whitespace-nowrap flex items-center">
+                              <span className="hidden min-[360px]:inline">Download</span>
+                              <span className="inline min-[360px]:hidden">DL</span>
+                              <span className="ml-1">({selectedMyOrders.length})</span>
+                            </span>
+                          </div>
                         )}
                       </Button>
                       
@@ -4051,18 +3976,21 @@ export function VendorDashboard() {
                             .filter(order => selectedMyOrders.includes(order.order_id))
                             .some(order => !order.label_downloaded || order.label_downloaded === 0 || order.label_downloaded === '0' || order.label_downloaded === false)
                         }
-                        className="flex-1 h-10 sm:h-12 text-sm sm:text-lg font-medium bg-gradient-to-br from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 border-0 shadow-lg min-w-0"
+                        className="flex-1 h-10 sm:h-12 text-xs sm:text-sm md:text-base font-medium bg-gradient-to-br from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 border-0 shadow-lg min-w-0 px-2 sm:px-3"
                       >
                         {bulkMarkReadyLoading ? (
                           <>
                             <div className={`animate-spin rounded-full border-b-2 border-white ${isMobile ? 'h-3 w-3 mr-1 sm:h-4 sm:w-4 sm:mr-2' : 'h-4 w-4 mr-2'}`}></div>
-                            <span className="truncate">{isMobile ? 'Loading' : 'Processing...'}</span>
+                            <span className="whitespace-nowrap">{isMobile ? 'Loading' : 'Processing...'}</span>
                           </>
                         ) : (
-                          <>
-                            <CheckCircle className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2 flex-shrink-0" />
-                            <span className="truncate">Ready ({selectedMyOrders.length})</span>
-                          </>
+                          <div className="flex items-center justify-center w-full">
+                            <CheckCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5 mr-1 sm:mr-1.5 flex-shrink-0" />
+                            <span className="whitespace-nowrap flex items-center">
+                              <span>Ready</span>
+                              <span className="ml-1">({selectedMyOrders.length})</span>
+                            </span>
+                          </div>
                         )}
                       </Button>
                     </div>
@@ -4163,7 +4091,7 @@ export function VendorDashboard() {
                   </div>
                 ) : isMobile ? (
                   /* Mobile Card Layout */
-                  <div className="space-y-2.5 sm:space-y-3 pb-32">
+                  <div className="space-y-2.5 sm:space-y-3 pb-32 mt-4">
                     {getFilteredTrackingOrders().length === 0 ? (
                       <div className="flex flex-col items-center justify-center py-12">
                         <Truck className="w-16 h-16 text-gray-300 mb-4" />
