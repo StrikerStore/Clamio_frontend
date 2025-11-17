@@ -518,7 +518,10 @@ export function VendorDashboard() {
         if (response.data.pagination) {
           setGroupedOrdersHasMore(response.data.pagination.hasMore);
           setGroupedOrdersTotalCount(response.data.pagination.total);
-          if (!resetPagination) {
+          // Increment page number for next load
+          if (resetPagination) {
+            setGroupedOrdersPage(2); // Set to 2 after initial load
+          } else {
             setGroupedOrdersPage(prev => prev + 1);
           }
         }
@@ -581,8 +584,10 @@ export function VendorDashboard() {
           setHandoverOrdersTotalQuantity(response.data.summary.total_quantity);
         }
         
-        // Increment page number when loading more
-        if (!resetPagination) {
+        // Increment page number for next load
+        if (resetPagination) {
+          setHandoverOrdersPage(2); // Set to 2 after initial load
+        } else {
           setHandoverOrdersPage(prev => prev + 1);
         }
       }
@@ -631,8 +636,10 @@ export function VendorDashboard() {
           setTrackingOrdersTotalQuantity(response.data.summary.total_quantity);
         }
         
-        // Increment page number when loading more
-        if (!resetPagination) {
+        // Increment page number for next load
+        if (resetPagination) {
+          setTrackingOrdersPage(2); // Set to 2 after initial load
+        } else {
           setTrackingOrdersPage(prev => prev + 1);
         }
       }
