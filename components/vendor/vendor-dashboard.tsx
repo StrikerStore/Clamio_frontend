@@ -2743,8 +2743,8 @@ export function VendorDashboard() {
           <CardContent className="p-2 sm:p-4 md:p-6">
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
               {/* Fixed Controls Section */}
-              <div className={`sticky ${isMobile ? 'top-16' : 'top-20'} bg-white z-40 pb-3 sm:pb-4 border-b mb-3 sm:mb-4`}>
-                <TabsList className={`grid w-full ${isMobile ? 'grid-cols-3' : 'grid-cols-4'} ${isMobile ? 'h-auto mb-3 sm:mb-4' : 'mb-6'}`}>
+              <div className={`sticky ${isMobile ? 'top-16' : 'top-20'} bg-white z-40 pb-3 sm:pb-4 border-b ${isMobile && activeTab === 'order-tracking' ? 'mb-0' : 'mb-3 sm:mb-4'}`}>
+                <TabsList className={`grid w-full ${isMobile ? 'grid-cols-3' : 'grid-cols-4'} ${isMobile ? `h-auto ${activeTab === 'order-tracking' ? 'mb-1' : 'mb-3 sm:mb-4'}` : 'mb-6'}`}>
                   <TabsTrigger value="all-orders" className={`${isMobile ? 'text-xs sm:text-sm px-1.5 sm:px-2 py-2.5 sm:py-3' : ''}`}>
                     All ({getQuantitySumForTab("all-orders")})
                   </TabsTrigger>
@@ -2784,7 +2784,7 @@ export function VendorDashboard() {
                 </TabsList>
 
                 {/* Filters */}
-                <div className={`flex flex-col gap-2 mb-2 md:mb-3 ${!isMobile && 'sm:flex-row sm:items-center'}`}>
+                <div className={`flex flex-col gap-2 ${isMobile && activeTab === 'order-tracking' ? 'mb-0' : 'mb-2 md:mb-3'} ${!isMobile && 'sm:flex-row sm:items-center'}`}>
                   <div className="flex-1 min-w-[200px]">
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
@@ -4144,7 +4144,7 @@ export function VendorDashboard() {
               )}
               
               {/* Order Tracking Tab Content - Shows orders that have been in handover for 24+ hours */}
-              <TabsContent value="order-tracking" className={`mt-0 ${isMobile ? '-mt-3' : ''}`}>
+              <TabsContent value="order-tracking" className="mt-0">
                 {trackingOrdersLoading ? (
                   <div className="flex items-center justify-center py-12">
                     <div className="text-center">
