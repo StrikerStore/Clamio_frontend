@@ -3019,7 +3019,7 @@ export function VendorDashboard() {
               <div 
                 ref={scrollableContentRef}
                 onScroll={handleScroll}
-                className={`${isMobile ? `max-h-[calc(100vh-280px)] ${activeTab === 'my-orders' ? 'pb-32' : activeTab === 'order-tracking' ? 'pb-4' : 'pb-20'}` : 'max-h-[600px]'} overflow-y-auto relative`}
+                className={`${isMobile ? `max-h-[calc(100vh-280px)] ${activeTab === 'my-orders' ? 'pb-32' : activeTab === 'order-tracking' ? 'pb-1' : 'pb-20'}` : 'max-h-[600px]'} overflow-y-auto relative`}
               >
                 <TabsContent value="all-orders" className="mt-0">
                   {/* Mobile Card Layout */}
