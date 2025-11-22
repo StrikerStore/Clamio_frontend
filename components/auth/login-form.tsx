@@ -140,19 +140,19 @@ export function LoginForm() {
         {/* Liquid Glass Shine Layer */}
         <div className="liquidGlass-shine absolute inset-0 z-[2]" />
         
-        <CardHeader className="space-y-2 relative z-10 pb-6 pt-8">
-          <CardTitle className="text-3xl text-center font-bold text-slate-800">
+        <CardHeader className="space-y-1 sm:space-y-2 relative z-10 pb-4 sm:pb-6 pt-5 sm:pt-8">
+          <CardTitle className="text-2xl sm:text-3xl text-center font-bold text-slate-800">
             Sign In
           </CardTitle>
-          <CardDescription className="text-center text-base text-slate-600">
+          <CardDescription className="text-center text-sm sm:text-base text-slate-600">
             Enter your credentials to access your dashboard
           </CardDescription>
         </CardHeader>
         
-        <CardContent className="relative z-10 pb-8">
-          <form onSubmit={handleSubmit} className="space-y-5 relative">
-            <div className="space-y-2 autofill-container">
-              <Label htmlFor="email" className="text-slate-700 font-medium">Email</Label>
+        <CardContent className="relative z-10 pb-5 sm:pb-8">
+          <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-5 relative">
+            <div className="space-y-1.5 sm:space-y-2 autofill-container">
+              <Label htmlFor="email" className="text-slate-700 font-medium text-sm sm:text-base">Email</Label>
               <Input
                 id="email"
                 type="email"
@@ -162,12 +162,12 @@ export function LoginForm() {
                 required={true}
                 disabled={loading}
                 autoComplete="email"
-                className="h-11 bg-white/40 backdrop-blur-md border-white/40 focus:border-blue-400/70 focus:ring-blue-400/20 focus:bg-white/50 transition-all duration-200 shadow-sm"
+                className="h-10 sm:h-11 bg-white/40 backdrop-blur-md border-white/40 focus:border-blue-400/70 focus:ring-blue-400/20 focus:bg-white/50 transition-all duration-200 shadow-sm text-sm sm:text-base"
               />
             </div>
             
-            <div className="space-y-2 autofill-container">
-              <Label htmlFor="password" className="text-slate-700 font-medium">Password</Label>
+            <div className="space-y-1.5 sm:space-y-2 autofill-container">
+              <Label htmlFor="password" className="text-slate-700 font-medium text-sm sm:text-base">Password</Label>
               <div className="relative">
                 <Input
                   id="password"
@@ -178,7 +178,7 @@ export function LoginForm() {
                   required={true}
                   disabled={loading}
                   autoComplete="current-password"
-                  className="h-11 pr-10 bg-white/60 backdrop-blur-md border-white/50 focus:border-blue-400/60 focus:ring-blue-400/20 focus:bg-white/70 transition-all duration-200 shadow-sm"
+                  className="h-10 sm:h-11 pr-10 bg-white/40 backdrop-blur-md border-white/40 focus:border-blue-400/70 focus:ring-blue-400/20 focus:bg-white/50 transition-all duration-200 shadow-sm text-sm sm:text-base"
                 />
                 <Button
                   type="button"
@@ -201,7 +201,7 @@ export function LoginForm() {
 
             <Button 
               type="submit" 
-              className="w-full h-11 bg-gradient-to-r from-gray-900 to-gray-800 hover:from-black hover:to-gray-900 text-white font-semibold shadow-lg hover:shadow-xl transform hover:scale-[1.02] transition-all duration-200" 
+              className="w-full h-10 sm:h-11 bg-gradient-to-r from-gray-900 to-gray-800 hover:from-black hover:to-gray-900 text-white font-semibold shadow-lg hover:shadow-xl transform hover:scale-[1.02] transition-all duration-200 text-sm sm:text-base" 
               disabled={loading}
             >
               {loading ? (
@@ -214,13 +214,13 @@ export function LoginForm() {
               )}
             </Button>
 
-            <div className="text-center pt-2">
+            <div className="text-center pt-1 sm:pt-2">
               <Dialog open={resetDialogOpen} onOpenChange={setResetDialogOpen}>
                 <DialogTrigger asChild>
                   <Button
                     type="button"
                     variant="link"
-                    className="text-sm font-medium text-slate-600 hover:text-slate-800 transition-all"
+                    className="text-xs sm:text-sm font-medium text-slate-600 hover:text-slate-800 transition-all"
                     onClick={openResetDialog}
                   >
                     <Lock className="mr-2 h-4 w-4 text-slate-500" />
