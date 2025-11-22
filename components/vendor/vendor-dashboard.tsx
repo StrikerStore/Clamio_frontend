@@ -34,6 +34,8 @@ import {
   Menu,
   X,
   ChevronUp,
+  Loader2,
+  Truck,
 } from "lucide-react"
 import { useAuth } from "@/components/auth/auth-provider"
 import { useToast } from "@/hooks/use-toast"
@@ -171,6 +173,11 @@ export function VendorDashboard() {
       dateFrom: undefined as Date | undefined,
       dateTo: undefined as Date | undefined,
     },
+    "order-tracking": {
+      searchTerm: "",
+      dateFrom: undefined as Date | undefined,
+      dateTo: undefined as Date | undefined,
+    },
   })
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [showRevenueModal, setShowRevenueModal] = useState(false)
@@ -179,7 +186,10 @@ export function VendorDashboard() {
   const [upiId, setUpiId] = useState("")
   const [selectedMyOrders, setSelectedMyOrders] = useState<string[]>([])
   const [selectedUnclaimedOrders, setSelectedUnclaimedOrders] = useState<string[]>([])
+  const [selectedHandoverOrders, setSelectedHandoverOrders] = useState<string[]>([])
+  const [selectedTrackingOrders, setSelectedTrackingOrders] = useState<string[]>([])
   const [bulkMarkReadyLoading, setBulkMarkReadyLoading] = useState(false)
+  const [manifestDownloadLoading, setManifestDownloadLoading] = useState<string | null>(null)
   const [vendorAddress, setVendorAddress] = useState<null | {
     warehouseId: string
     address: string
@@ -206,6 +216,26 @@ export function VendorDashboard() {
   const [groupedOrdersTotalCount, setGroupedOrdersTotalCount] = useState(0);
   const [groupedOrdersTotalQuantity, setGroupedOrdersTotalQuantity] = useState(0);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  // Store all grouped orders (all pages) for filtered count calculation
+  const [allGroupedOrders, setAllGroupedOrders] = useState<any[]>([]);
+  const [isLoadingAllOrders, setIsLoadingAllOrders] = useState(false);
+
+  // Handover orders state
+  const [handoverOrders, setHandoverOrders] = useState<any[]>([]);
+  const [handoverOrdersLoading, setHandoverOrdersLoading] = useState(true);
+  const [handoverOrdersError, setHandoverOrdersError] = useState("");
+  const [handoverOrdersPage, setHandoverOrdersPage] = useState(1);
+  const [handoverOrdersHasMore, setHandoverOrdersHasMore] = useState(true);
+  const [handoverOrdersTotalCount, setHandoverOrdersTotalCount] = useState(0);
+  const [handoverOrdersTotalQuantity, setHandoverOrdersTotalQuantity] = useState(0);
+  const [isLoadingMoreHandover, setIsLoadingMoreHandover] = useState(false);
+
+  // Order Tracking orders state (no pagination - loads all orders at once)
+  const [trackingOrders, setTrackingOrders] = useState<any[]>([]);
+  const [trackingOrdersLoading, setTrackingOrdersLoading] = useState(true);
+  const [trackingOrdersError, setTrackingOrdersError] = useState("");
+  const [trackingOrdersTotalCount, setTrackingOrdersTotalCount] = useState(0);
+  const [trackingOrdersTotalQuantity, setTrackingOrdersTotalQuantity] = useState(0);
 
   // Settlement-related state
   const [payments, setPayments] = useState<{ currentPayment: number; futurePayment: number } | null>(null)
@@ -232,6 +262,9 @@ export function VendorDashboard() {
   
   // Status filter state for handover tab
   const [selectedStatuses, setSelectedStatuses] = useState<string[]>([])
+  
+  // Status filter state for order tracking tab
+  const [selectedTrackingStatuses, setSelectedTrackingStatuses] = useState<string[]>([])
   
   // Label download filter state for my orders tab
   const [selectedLabelFilter, setSelectedLabelFilter] = useState<string>('all')
@@ -366,10 +399,23 @@ export function VendorDashboard() {
           setGroupedOrdersTotalCount(groupedResponse.data.pagination.total);
         }
         
+        // Ensure My Orders card/tab counts reflect the latest absolute total
+        if (typeof groupedResponse.data.totalQuantity === 'number') {
+          setGroupedOrdersTotalQuantity(groupedResponse.data.totalQuantity);
+        }
+        
         console.log('✅ Grouped orders refreshed successfully');
       } else {
         console.log('⚠️ Failed to refresh grouped orders');
       }
+
+      // Refresh Handover orders
+      console.log('🔄 Refreshing handover orders data...');
+      await fetchHandoverOrders();
+
+      // Refresh Order Tracking orders
+      console.log('🔄 Refreshing order tracking orders data...');
+      await fetchOrderTrackingOrders();
     } catch (err: any) {
       console.error("Error refreshing orders:", err);
       setOrdersError(err.message || "Failed to refresh orders");
@@ -407,6 +453,41 @@ export function VendorDashboard() {
     }
   }
 
+  // Fetch all grouped orders (all pages) for filtered count calculation
+  const fetchAllGroupedOrders = async () => {
+    setIsLoadingAllOrders(true);
+    try {
+      let allOrders: any[] = [];
+      let page = 1;
+      let hasMore = true;
+      
+      while (hasMore) {
+        const response = await apiClient.getGroupedOrders(page, 50);
+        
+        if (response.success && response.data && Array.isArray(response.data.groupedOrders)) {
+          allOrders = [...allOrders, ...response.data.groupedOrders];
+          
+          if (response.data.pagination) {
+            hasMore = response.data.pagination.hasMore;
+            page++;
+          } else {
+            hasMore = false;
+          }
+        } else {
+          hasMore = false;
+        }
+      }
+      
+      console.log('✅ Fetched all grouped orders:', allOrders.length);
+      setAllGroupedOrders(allOrders);
+    } catch (err: any) {
+      console.error('❌ Error fetching all grouped orders:', err);
+      setAllGroupedOrders([]);
+    } finally {
+      setIsLoadingAllOrders(false);
+    }
+  };
+
   const fetchGroupedOrders = async (resetPagination: boolean = true) => {
     if (resetPagination) {
       setGroupedOrdersLoading(true);
@@ -434,7 +515,10 @@ export function VendorDashboard() {
         if (response.data.pagination) {
           setGroupedOrdersHasMore(response.data.pagination.hasMore);
           setGroupedOrdersTotalCount(response.data.pagination.total);
-          if (!resetPagination) {
+          // Increment page number for next load
+          if (resetPagination) {
+            setGroupedOrdersPage(2); // Set to 2 after initial load
+          } else {
             setGroupedOrdersPage(prev => prev + 1);
           }
         }
@@ -463,10 +547,115 @@ export function VendorDashboard() {
     }
   }
 
+  const fetchHandoverOrders = async (resetPagination: boolean = true) => {
+    if (resetPagination) {
+      setHandoverOrdersLoading(true);
+      setHandoverOrdersPage(1);
+    } else {
+      setIsLoadingMoreHandover(true);
+    }
+    
+    setHandoverOrdersError("");
+    
+    try {
+      const page = resetPagination ? 1 : handoverOrdersPage;
+      const response = await apiClient.getHandoverOrders(page, 50);
+      
+      if (response.success && response.data) {
+        const newOrders = response.data.handoverOrders || [];
+        
+        if (resetPagination) {
+          setHandoverOrders(newOrders);
+        } else {
+          setHandoverOrders(prev => [...prev, ...newOrders]);
+        }
+        
+        // Update pagination metadata
+        setHandoverOrdersHasMore(response.data.pagination?.has_next || false);
+        
+        // Always update total count from API (even if page is not fully loaded)
+        if (response.data.summary?.total_orders !== undefined) {
+          setHandoverOrdersTotalCount(response.data.summary.total_orders);
+        }
+        if (response.data.summary?.total_quantity !== undefined) {
+          setHandoverOrdersTotalQuantity(response.data.summary.total_quantity);
+        }
+        
+        // Increment page number for next load
+        if (resetPagination) {
+          setHandoverOrdersPage(2); // Set to 2 after initial load
+        } else {
+          setHandoverOrdersPage(prev => prev + 1);
+        }
+      }
+    } catch (err: any) {
+      setHandoverOrdersError(err.message || "Failed to fetch handover orders");
+      if (resetPagination) {
+        setHandoverOrders([]);
+      }
+    } finally {
+      setHandoverOrdersLoading(false);
+      setIsLoadingMoreHandover(false);
+    }
+  };
+
+  const fetchOrderTrackingOrders = async () => {
+    setTrackingOrdersLoading(true);
+    setTrackingOrdersError("");
+    
+    try {
+      const response = await apiClient.getOrderTrackingOrders();
+      
+      if (response.success && response.data) {
+        const allOrders = response.data.trackingOrders || [];
+        setTrackingOrders(allOrders);
+        
+        // Update summary data
+        if (response.data.summary?.total_orders !== undefined) {
+          setTrackingOrdersTotalCount(response.data.summary.total_orders);
+        }
+        if (response.data.summary?.total_quantity !== undefined) {
+          setTrackingOrdersTotalQuantity(response.data.summary.total_quantity);
+        }
+      }
+    } catch (err: any) {
+      setTrackingOrdersError(err.message || "Failed to fetch order tracking orders");
+      setTrackingOrders([]);
+    } finally {
+      setTrackingOrdersLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchOrders();
     fetchGroupedOrders();
+    fetchHandoverOrders();
+    fetchOrderTrackingOrders();
   }, []);
+
+  // Fetch all orders when filters are applied on My Orders tab
+  useEffect(() => {
+    if (activeTab !== "my-orders") {
+      // Clear all orders when not on my-orders tab to save memory
+      setAllGroupedOrders([]);
+      return;
+    }
+
+    const tabFilter = tabFilters["my-orders"];
+    const hasSearchFilter = tabFilter.searchTerm.trim().length > 0;
+    const hasDateFilter = tabFilter.dateFrom || tabFilter.dateTo;
+    const hasLabelFilter = selectedLabelFilter !== 'all';
+    const hasFilters = hasSearchFilter || hasDateFilter || hasLabelFilter;
+
+    if (hasFilters && !isLoadingAllOrders && allGroupedOrders.length === 0) {
+      // Fetch all orders when filters are applied and we don't have them yet
+      console.log('🔍 Filters applied - fetching all grouped orders for filtered count');
+      fetchAllGroupedOrders();
+    } else if (!hasFilters && allGroupedOrders.length > 0) {
+      // Clear all orders when filters are removed to save memory
+      setAllGroupedOrders([]);
+    }
+  }, [activeTab, tabFilters["my-orders"].searchTerm, tabFilters["my-orders"].dateFrom, tabFilters["my-orders"].dateTo, selectedLabelFilter]);
 
   // Real-time polling for order updates
   useEffect(() => {
@@ -502,12 +691,49 @@ export function VendorDashboard() {
 
   const handleClaimOrder = async (unique_id: string) => {
     console.log('🔵 FRONTEND: Starting claim process');
-    console.log('  - unique_id:', unique_id);
+    console.log('  - Frontend unique_id:', unique_id);
     console.log('  - vendorToken from localStorage:', localStorage.getItem('vendorToken')?.substring(0, 8) + '...');
+    
+    // Find the order - first try in filtered/split orders (all-orders tab), then in original orders
+    // This is necessary because split orders only exist in the filtered result
+    let order = getFilteredOrdersForTab("all-orders").find((o: any) => o.unique_id === unique_id);
+    
+    // If not found in filtered orders, try original orders (shouldn't happen in all-orders tab)
+    if (!order) {
+      order = orders.find(o => o.unique_id === unique_id);
+    }
+    
+    if (!order) {
+      console.error('❌ FRONTEND: Order not found in local state');
+      console.error('  - Looking for unique_id:', unique_id);
+      console.error('  - Tried in filtered orders and original orders');
+      toast({
+        title: 'Error',
+        description: 'Order not found. Please refresh the page.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    
+    // For split orders (quantity > 1 originally), use original_unique_id
+    // For non-split orders (quantity = 1), unique_id and original_unique_id should be the same
+    const backendUniqueId = order.original_unique_id || order.unique_id;
+    const originalQuantity = order.original_quantity || order.quantity || 1;
+    const quantityToClaim = order.quantity || 1; // This will be 1 for split orders
+    
+    console.log('  - Backend unique_id (for database lookup):', backendUniqueId);
+    console.log('  - Original quantity in database:', originalQuantity);
+    console.log('  - Quantity to claim (for this specific unit):', quantityToClaim);
+    console.log('  - Order details:', JSON.stringify({
+      frontend_unique_id: order.unique_id,
+      backend_unique_id: backendUniqueId,
+      is_split: order.unique_id !== backendUniqueId,
+      unit_index: order.unit_index
+    }));
     
     try {
       console.log('📤 FRONTEND: Calling apiClient.claimOrder...');
-      const response = await apiClient.claimOrder(unique_id);
+      const response = await apiClient.claimOrder(backendUniqueId, quantityToClaim);
       
       console.log('📥 FRONTEND: Response received');
       console.log('  - success:', response.success);
@@ -517,21 +743,14 @@ export function VendorDashboard() {
       if (response.success && response.data) {
         console.log('✅ FRONTEND: Claim successful, updating UI');
         
-        // Update the order in the orders array with the new data
-        setOrders((prevOrders) =>
-          prevOrders.map((order) =>
-            order.unique_id === unique_id ? { ...order, ...response.data } : order
-          )
-        );
-        
-        // Show success message with order_id
+        // Show success message with order_id and quantity
         const claimedOrderId = response.data.order_id || unique_id;
         toast({
           title: 'Order Claimed',
-          description: `Claimed order id ${claimedOrderId}`,
+          description: `Claimed ${quantityToClaim} unit${quantityToClaim > 1 ? 's' : ''} of order ${claimedOrderId}`,
         });
         
-                // Refresh orders to ensure tabs are updated correctly
+        // Refresh orders to ensure tabs are updated correctly and show the latest state
         console.log('🔄 FRONTEND: Refreshing orders to update tab filtering...');
         try {
           await refreshOrders();
@@ -611,6 +830,112 @@ export function VendorDashboard() {
     }
   }
 
+  const downloadManifestSummary = async (manifestIds: string[]) => {
+    const manifestKey = manifestIds.join(',');
+    try {
+      setManifestDownloadLoading(manifestKey);
+      
+      const vendorToken = localStorage.getItem('vendorToken');
+      if (!vendorToken) {
+        console.error('No vendor token found');
+        return;
+      }
+
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+      const response = await fetch(`${API_BASE_URL}/orders/download-manifest-summary`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': vendorToken,
+        },
+        body: JSON.stringify({ manifest_ids: manifestIds }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to download manifest summary');
+      }
+
+      // Download PDF
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      const timestamp = new Date().toISOString().split('T')[0];
+      link.download = `manifest-summary-${timestamp}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+      toast({
+        title: "Manifest Downloaded",
+        description: "Manifest summary PDF has been downloaded successfully",
+      });
+    } catch (error) {
+      console.error('Error downloading manifest summary:', error);
+      toast({
+        title: "Download Failed",
+        description: "Failed to download manifest summary PDF",
+        variant: "destructive",
+      });
+    } finally {
+      setManifestDownloadLoading(null);
+    }
+  };
+
+  const handleBulkManifestDownload = async () => {
+    if (selectedHandoverOrders.length === 0) {
+      toast({
+        title: "No Orders Selected",
+        description: "Please select at least one order to download manifests",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      // Get filtered orders for handover tab
+      const handoverOrders = getFilteredHandoverOrders();
+      
+      // Extract unique manifest_ids from selected orders
+      const uniqueManifestIds = new Set<string>();
+      
+      selectedHandoverOrders.forEach(orderId => {
+        const order = handoverOrders.find((o: any) => o.order_id === orderId);
+        if (order && order.manifest_id) {
+          uniqueManifestIds.add(order.manifest_id);
+        }
+      });
+
+      const manifestIdsArray = Array.from(uniqueManifestIds);
+
+      if (manifestIdsArray.length === 0) {
+        toast({
+          title: "No Manifest IDs Found",
+          description: "Selected orders do not have manifest IDs",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      console.log('📥 Bulk downloading manifests:', manifestIdsArray);
+      
+      // Download all manifests in single PDF
+      await downloadManifestSummary(manifestIdsArray);
+      
+      // Clear selection after successful download
+      setSelectedHandoverOrders([]);
+      
+    } catch (error) {
+      console.error('Bulk manifest download error:', error);
+      toast({
+        title: "Download Failed",
+        description: "Failed to download manifests",
+        variant: "destructive",
+      });
+    }
+  };
+
   const handleBulkMarkReady = async () => {
     if (selectedMyOrders.length === 0) {
       toast({
@@ -661,6 +986,12 @@ export function VendorDashboard() {
           console.log('Failed orders:', data.data.failed_orders);
         }
         
+        // Auto-download manifest summary PDF
+        if (data.data.manifest_ids && data.data.manifest_ids.length > 0) {
+          console.log('📥 Auto-downloading manifest summary PDF...', data.data.manifest_ids);
+          await downloadManifestSummary(data.data.manifest_ids);
+        }
+        
         // Clear selection and refresh orders
         setSelectedMyOrders([]);
         
@@ -668,6 +999,7 @@ export function VendorDashboard() {
         highlightTab("handover");
         
         fetchGroupedOrders();
+        fetchHandoverOrders();
       } else {
         toast({
           title: "Error",
@@ -767,6 +1099,24 @@ export function VendorDashboard() {
     )
   }
 
+  // Maps shipment status to colored badge classes per UI requirement
+  const getShipmentBadgeClasses = (status?: string) => {
+    const s = (status || '').toLowerCase();
+    if (s === 'in transit' || s === 'in_transit' || s.includes('transit')) {
+      return 'text-orange-800 bg-orange-100 border border-orange-200';
+    }
+    if (s === 'out for delivery' || s === 'out_for_delivery') {
+      return 'text-yellow-800 bg-yellow-100 border border-yellow-200';
+    }
+    if (s === 'delivered') {
+      return 'text-green-800 bg-green-100 border border-green-200';
+    }
+    if (s === 'pickup failed' || s === 'failed pickup' || s === 'failed delivery') {
+      return 'text-red-800 bg-red-100 border border-red-200';
+    }
+    return 'text-blue-800 bg-blue-100 border border-blue-200';
+  }
+
   const getPriorityBadge = (priority: string) => {
     const colors = {
       low: "bg-green-100 text-green-800",
@@ -848,6 +1198,40 @@ export function VendorDashboard() {
     return uniqueOrders;
   };
 
+  // Helper function to split orders by quantity (each unit becomes a separate row)
+  const splitOrdersByQuantity = (ordersList: any[]) => {
+    const splitOrders: any[] = [];
+    
+    ordersList.forEach(order => {
+      const quantity = order.quantity || 1;
+      
+      // If quantity is 1, don't split - just return the order as-is
+      if (quantity === 1) {
+        splitOrders.push({
+          ...order,
+          // Don't modify unique_id for single quantity orders
+          // This ensures the original unique_id is used
+          original_unique_id: order.unique_id, // Store for consistency
+          original_quantity: 1
+        });
+      } else {
+        // Split orders with quantity > 1 into individual units
+        for (let i = 0; i < quantity; i++) {
+          splitOrders.push({
+            ...order,
+            quantity: 1, // Each row represents 1 unit
+            original_unique_id: order.unique_id, // Store original unique_id for backend
+            unique_id: `${order.unique_id}_unit_${i + 1}`, // Make unique_id truly unique for each unit
+            original_quantity: quantity, // Store original quantity for reference
+            unit_index: i + 1 // Track which unit this is (1-based)
+          });
+        }
+      }
+    });
+    
+    return splitOrders;
+  };
+
   // Filter orders based on active tab and search/date filters
   const getFilteredOrdersForTab = (tab: string) => {
     if (tab === "my-orders") {
@@ -864,6 +1248,8 @@ export function VendorDashboard() {
       case "all-orders":
         // Show only unclaimed orders
         baseOrders = orders.filter(order => order.status === 'unclaimed');
+        // Split orders by quantity so each unit can be claimed individually
+        baseOrders = splitOrdersByQuantity(baseOrders);
         break;
       case "handover":
         // Show orders ready for handover by current vendor with is_manifest = 1
@@ -894,6 +1280,7 @@ export function VendorDashboard() {
               current_shipment_status: order.current_shipment_status,
               is_handover: order.is_handover,
               is_manifest: order.is_manifest,
+              manifest_id: order.manifest_id,
               total_quantity: 0,
               products: []
             };
@@ -946,9 +1333,21 @@ export function VendorDashboard() {
       const term = tabFilter.searchTerm.toLowerCase();
       baseOrders = baseOrders.filter(order => {
         const orderId = String(order.order_id || order.id || '').toLowerCase();
+        const customer = String(order.customer_name || order.customer || '').toLowerCase();
+        
+        // For grouped orders (handover tab), search through products array
+        if (Array.isArray(order.products) && order.products.length > 0) {
+          const productMatch = order.products.some((product: any) => {
+            const name = String(product.product_name || '').toLowerCase();
+            const sku = String(product.product_code || product.sku || '').toLowerCase();
+            return name.includes(term) || sku.includes(term);
+          });
+          return orderId.includes(term) || customer.includes(term) || productMatch;
+        }
+        
+        // For individual orders (all-orders tab), search direct fields
         const productName = String(order.product_name || order.product || '').toLowerCase();
         const sku = String(order.product_code || order.sku || '').toLowerCase();
-        const customer = String(order.customer_name || order.customer || '').toLowerCase();
         return (
           orderId.includes(term) ||
           productName.includes(term) ||
@@ -1005,8 +1404,174 @@ export function VendorDashboard() {
     }
     
     // Ensure unique orders before returning
-    return ensureUniqueOrders(baseOrders, 'unique_id');
+    // Use 'order_id' for handover tab (grouped orders) and 'unique_id' for all-orders tab (individual orders)
+    const deduplicationKey = tab === "handover" ? 'order_id' : 'unique_id';
+    return ensureUniqueOrders(baseOrders, deduplicationKey);
   }
+
+  // Filter handover orders based on search/date/status filters
+  const getFilteredHandoverOrders = () => {
+    let filtered = [...handoverOrders];
+    const tabFilter = tabFilters["handover"];
+    
+    // Apply status filter if any statuses are selected
+    if (selectedStatuses.length > 0) {
+      filtered = filtered.filter(order => 
+        selectedStatuses.includes(order.current_shipment_status || order.status)
+      );
+    }
+    
+    // Apply search filter
+    if (tabFilter.searchTerm.trim()) {
+      const term = tabFilter.searchTerm.toLowerCase();
+      filtered = filtered.filter(order => {
+        const orderId = String(order.order_id || '').toLowerCase();
+        const customer = String(order.customer_name || '').toLowerCase();
+        const manifestId = String(order.manifest_id || '').toLowerCase();
+        const awb = String(order.products?.[0]?.awb || '').toLowerCase();
+        
+        // Search through products array
+        if (Array.isArray(order.products) && order.products.length > 0) {
+          const productMatch = order.products.some((product: any) => {
+            const name = String(product.product_name || '').toLowerCase();
+            const sku = String(product.product_code || '').toLowerCase();
+            return name.includes(term) || sku.includes(term);
+          });
+          return orderId.includes(term) || customer.includes(term) || manifestId.includes(term) || awb.includes(term) || productMatch;
+        }
+        return orderId.includes(term) || customer.includes(term) || manifestId.includes(term) || awb.includes(term);
+      });
+    }
+    
+    // Apply date range filter
+    if (tabFilter.dateFrom && tabFilter.dateTo) {
+      filtered = filtered.filter(order => {
+        const orderDate = order.order_date;
+        if (!orderDate) return true;
+        
+        try {
+          const orderDateObj = new Date(orderDate);
+          const fromDateObj = new Date(tabFilter.dateFrom!);
+          const toDateObj = new Date(tabFilter.dateTo!);
+          toDateObj.setHours(23, 59, 59, 999);
+          
+          return orderDateObj >= fromDateObj && orderDateObj <= toDateObj;
+        } catch (error) {
+          return true;
+        }
+      });
+    } else if (tabFilter.dateFrom) {
+      filtered = filtered.filter(order => {
+        const orderDate = order.order_date;
+        if (!orderDate) return true;
+        
+        try {
+          const orderDateObj = new Date(orderDate);
+          const fromDateObj = new Date(tabFilter.dateFrom!);
+          return orderDateObj >= fromDateObj;
+        } catch (error) {
+          return true;
+        }
+      });
+    } else if (tabFilter.dateTo) {
+      filtered = filtered.filter(order => {
+        const orderDate = order.order_date;
+        if (!orderDate) return true;
+        
+        try {
+          const orderDateObj = new Date(orderDate);
+          const toDateObj = new Date(tabFilter.dateTo!);
+          toDateObj.setHours(23, 59, 59, 999);
+          return orderDateObj <= toDateObj;
+        } catch (error) {
+          return true;
+        }
+      });
+    }
+    
+    return filtered;
+  };
+
+  // Filter tracking orders based on search/date/status filters
+  const getFilteredTrackingOrders = () => {
+    let filtered = [...trackingOrders];
+    const tabFilter = tabFilters["order-tracking"];
+    
+    // Apply status filter if any statuses are selected
+    if (selectedTrackingStatuses.length > 0) {
+      filtered = filtered.filter(order => 
+        selectedTrackingStatuses.includes(order.current_shipment_status || order.status)
+      );
+    }
+    
+    // Apply search filter
+    if (tabFilter.searchTerm.trim()) {
+      const term = tabFilter.searchTerm.toLowerCase();
+      filtered = filtered.filter(order => {
+        const orderId = String(order.order_id || '').toLowerCase();
+        const awb = String(order.products?.[0]?.awb || '').toLowerCase();
+        
+        // Search through products array
+        if (Array.isArray(order.products) && order.products.length > 0) {
+          const productMatch = order.products.some((product: any) => {
+            const name = String(product.product_name || '').toLowerCase();
+            const sku = String(product.product_code || '').toLowerCase();
+            return name.includes(term) || sku.includes(term);
+          });
+          return orderId.includes(term) || awb.includes(term) || productMatch;
+        }
+        return orderId.includes(term) || awb.includes(term);
+      });
+    }
+    
+    // Apply date range filter
+    if (tabFilter.dateFrom && tabFilter.dateTo) {
+      filtered = filtered.filter(order => {
+        const orderDate = order.order_date;
+        if (!orderDate) return true;
+        
+        try {
+          const orderDateObj = new Date(orderDate);
+          const fromDateObj = new Date(tabFilter.dateFrom!);
+          const toDateObj = new Date(tabFilter.dateTo!);
+          toDateObj.setHours(23, 59, 59, 999);
+          
+          return orderDateObj >= fromDateObj && orderDateObj <= toDateObj;
+        } catch (error) {
+          return true;
+        }
+      });
+    } else if (tabFilter.dateFrom) {
+      filtered = filtered.filter(order => {
+        const orderDate = order.order_date;
+        if (!orderDate) return true;
+        
+        try {
+          const orderDateObj = new Date(orderDate);
+          const fromDateObj = new Date(tabFilter.dateFrom!);
+          return orderDateObj >= fromDateObj;
+        } catch (error) {
+          return true;
+        }
+      });
+    } else if (tabFilter.dateTo) {
+      filtered = filtered.filter(order => {
+        const orderDate = order.order_date;
+        if (!orderDate) return true;
+        
+        try {
+          const orderDateObj = new Date(orderDate);
+          const toDateObj = new Date(tabFilter.dateTo!);
+          toDateObj.setHours(23, 59, 59, 999);
+          return orderDateObj <= toDateObj;
+        } catch (error) {
+          return true;
+        }
+      });
+    }
+    
+    return filtered;
+  };
 
   // Get unique status values from orders data
   const getUniqueStatuses = () => {
@@ -1019,9 +1584,21 @@ export function VendorDashboard() {
     return Array.from(uniqueStatuses).sort();
   }
 
-  // Filter grouped orders for My Orders tab
-  const getFilteredGroupedOrdersForTab = (tab: string) => {
-    let baseOrders = groupedOrders;
+  // Get unique shipment status values from tracking orders
+  const getUniqueTrackingStatuses = () => {
+    const uniqueStatuses = new Set<string>();
+    trackingOrders.forEach(order => {
+      const status = order.current_shipment_status || order.status;
+      if (status && status.trim() !== '') {
+        uniqueStatuses.add(status);
+      }
+    });
+    return Array.from(uniqueStatuses).sort();
+  }
+
+  // Filter grouped orders for My Orders tab (with option to use all orders)
+  const getFilteredGroupedOrdersForTab = (tab: string, useAllOrders: boolean = false) => {
+    let baseOrders = useAllOrders && allGroupedOrders.length > 0 ? allGroupedOrders : groupedOrders;
     const tabFilter = tabFilters[tab as keyof typeof tabFilters];
     
     // Apply label download filter for my orders tab
@@ -1163,6 +1740,18 @@ export function VendorDashboard() {
   const handleViewRequest = (settlement: any) => {
     setSelectedSettlementForView(settlement);
     setShowViewRequestDialog(true);
+  };
+
+  // Helper function to check if unclaim should be disabled
+  const isUnclaimDisabled = (order: any): boolean => {
+    // Disable if order is handed over (is_handover = 1)
+    const isHandedOver = order.is_handover === 1 || order.is_handover === '1' || order.is_handover === true;
+    
+    // Disable if status is "Out for Pickup"
+    const isOutForPickup = order.current_shipment_status && 
+      String(order.current_shipment_status).toLowerCase() === 'out for pickup';
+    
+    return isHandedOver || isOutForPickup;
   };
 
   const handleRequestReverse = async (orderId: string, uniqueIds?: string[]) => {
@@ -1561,16 +2150,67 @@ export function VendorDashboard() {
     console.log('🔵 FRONTEND: Starting bulk claim process');
     console.log('  - selected orders:', selectedUnclaimedOrders);
 
+    // Group selected orders by original_unique_id and calculate total quantity for each
+    const orderGroups = new Map<string, { unique_id: string, total_quantity: number }>();
+    
+    selectedUnclaimedOrders.forEach(uniqueId => {
+      const order = orders.find(o => o.unique_id === uniqueId);
+      const backendUniqueId = order?.original_unique_id || uniqueId;
+      const quantity = order?.quantity || 1;
+      
+      if (orderGroups.has(backendUniqueId)) {
+        const existing = orderGroups.get(backendUniqueId)!;
+        existing.total_quantity += quantity;
+      } else {
+        orderGroups.set(backendUniqueId, {
+          unique_id: backendUniqueId,
+          total_quantity: quantity
+        });
+      }
+    });
+
+    // Create an array of claim requests with quantities
+    const claimRequests = Array.from(orderGroups.values());
+    
+    console.log('  - grouped claim requests:', claimRequests);
+    console.log('  - total unique orders to claim:', claimRequests.length);
+
     try {
-      console.log('📤 FRONTEND: Calling apiClient.bulkClaimOrders...');
-      const response = await apiClient.bulkClaimOrders(selectedUnclaimedOrders);
+      console.log('📤 FRONTEND: Processing bulk claims...');
+      
+      // Process each claim request individually
+      let successCount = 0;
+      let failCount = 0;
+      
+      for (const request of claimRequests) {
+        try {
+          const response = await apiClient.claimOrder(request.unique_id, request.total_quantity);
+          if (response.success) {
+            successCount++;
+          } else {
+            failCount++;
+          }
+        } catch (error) {
+          console.error(`Failed to claim ${request.unique_id}:`, error);
+          failCount++;
+        }
+      }
+      
+      const response = {
+        success: true,
+        message: 'Bulk claim completed',
+        data: {
+          total_successful: successCount,
+          total_failed: failCount
+        }
+      };
       
       console.log('📥 FRONTEND: Bulk claim response received');
       console.log('  - success:', response.success);
       console.log('  - data:', response.data);
       
       if (response.success && response.data) {
-        const { successful_claims, failed_claims, total_successful, total_failed } = response.data;
+        const { total_successful, total_failed } = response.data;
         
         console.log('✅ FRONTEND: Bulk claim successful');
         console.log('  - Successful:', total_successful);
@@ -1579,7 +2219,7 @@ export function VendorDashboard() {
         // Show success message
         toast({
           title: "Bulk Claim Complete",
-          description: `Successfully claimed ${total_successful} orders${total_failed > 0 ? `. ${total_failed} orders failed to claim.` : ''}`,
+          description: `Successfully claimed ${total_successful} product${total_successful !== 1 ? 's' : ''}${total_failed > 0 ? `. ${total_failed} failed to claim.` : ''}`,
         });
         
         // Clear selected orders
@@ -1628,20 +2268,25 @@ export function VendorDashboard() {
     }
   };
 
-  // Infinite scroll handler for My Orders
+  // Infinite scroll handler for all tabs
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    // Only apply infinite scroll for My Orders tab
-    if (activeTab !== 'my-orders') return;
-    
     const element = e.currentTarget;
     const scrolledToBottom = 
       element.scrollHeight - element.scrollTop <= element.clientHeight + 200;
     
-    // Load more when scrolled near bottom and there's more data
-    if (scrolledToBottom && groupedOrdersHasMore && !groupedOrdersLoading && !isLoadingMore) {
-      console.log('📜 Infinite scroll triggered - loading more orders...');
+    // Handle My Orders tab
+    if (activeTab === 'my-orders' && scrolledToBottom && groupedOrdersHasMore && !groupedOrdersLoading && !isLoadingMore) {
+      console.log('📜 Infinite scroll triggered - loading more My Orders...');
       fetchGroupedOrders(false); // false = don't reset pagination
     }
+    
+    // Handle Handover tab
+    if (activeTab === 'handover' && scrolledToBottom && handoverOrdersHasMore && !handoverOrdersLoading && !isLoadingMoreHandover) {
+      console.log('📜 Infinite scroll triggered - loading more Handover orders...');
+      fetchHandoverOrders(false); // false = don't reset pagination
+    }
+    
+    // Order Tracking tab loads all orders at once, no infinite scroll needed
   };
 
   // Helper function to trigger tab highlight animation
@@ -1654,6 +2299,10 @@ export function VendorDashboard() {
   };
 
   // Helper functions to calculate quantity sums for each tab (WITHOUT filters - for cards)
+  // IMPORTANT: 
+  // - All counts show PRODUCT totals (sum of quantities), not order counts
+  // - Cards ALWAYS show TOTAL (unfiltered) counts, regardless of any active filters
+  // - Example: 3 orders with one order having 3 products = 5 total products displayed
   const getTotalQuantitySumForTab = (tabName: string) => {
     if (tabName === "my-orders") {
       // For My Orders card, use the absolute total (no filtering applied)
@@ -1672,29 +2321,11 @@ export function VendorDashboard() {
       
       return groupedOrdersTotalQuantity;
     } else if (tabName === "handover") {
-      // For Handover, calculate total without status filters
-      const currentVendorId = user?.warehouseId;
-      const handoverOrders = orders.filter(order => 
-        order.claims_status === 'ready_for_handover' && 
-        order.claimed_by === currentVendorId &&
-        order.is_manifest === 1
-      );
-      
-      // Group orders by order_id for handover tab (no status filtering)
-      const handoverGrouped = handoverOrders.reduce((acc: any, order) => {
-        const orderId = order.order_id;
-        if (!acc[orderId]) {
-          acc[orderId] = {
-            total_quantity: 0
-          };
-        }
-        acc[orderId].total_quantity += order.quantity || 0;
-        return acc;
-      }, {});
-      
-      return Object.values(handoverGrouped).reduce((sum: number, order: any) => {
-        return sum + (order.total_quantity || 0);
-      }, 0);
+      // For Handover card, use the API total quantity
+      return handoverOrdersTotalQuantity;
+    } else if (tabName === "order-tracking") {
+      // For Order Tracking card, use the API total quantity
+      return trackingOrdersTotalQuantity;
     } else {
       // For All Orders card, show absolute total of unclaimed orders (no additional filters)
       const unclaimedOrders = orders.filter(order => order.status === 'unclaimed');
@@ -1713,90 +2344,126 @@ export function VendorDashboard() {
     }
   };
 
-  // Helper functions to calculate quantity sums for each tab (WITH filters - for tab content)
+  // Helper functions to calculate quantity sums for each tab (WITH filters - for tab headers)
+  // IMPORTANT:
+  // - All counts show PRODUCT totals (sum of quantities), not order counts
+  // - When NO filters: Shows same total as card (synchronized)
+  // - When filters ARE applied: Shows FILTERED product count (different from card)
   const getQuantitySumForTab = (tabName: string) => {
     if (tabName === "my-orders") {
-      // For My Orders tab, use the filtered results (applies search, date, label filters)
-      const filteredOrders = getFilteredGroupedOrdersForTab(tabName);
-      console.log('🔢 TAB COUNT: Using filtered orders for tab count');
-      console.log('🔢 TAB COUNT: filteredOrders.length:', filteredOrders.length);
-      console.log('🔢 TAB COUNT: groupedOrders.length (unfiltered):', groupedOrders.length);
+      const tabFilter = tabFilters[tabName as keyof typeof tabFilters];
       
-      // Calculate total quantity from filtered orders
-      const filteredTotal = filteredOrders.reduce((sum, order) => {
-        return sum + (order.total_quantity || 0);
-      }, 0);
+      // Check if any filters are applied
+      const hasSearchFilter = tabFilter.searchTerm.trim().length > 0;
+      const hasDateFilter = tabFilter.dateFrom || tabFilter.dateTo;
+      const hasLabelFilter = selectedLabelFilter !== 'all';
+      const hasFilters = hasSearchFilter || hasDateFilter || hasLabelFilter;
       
-      console.log('🔢 TAB COUNT: Filtered total quantity:', filteredTotal);
-      return filteredTotal;
-    } else if (tabName === "handover") {
-      // For Handover, use the same grouping logic as the tab content
-      const currentVendorId = user?.warehouseId;
-      let handoverOrders = orders.filter(order => 
-        order.claims_status === 'ready_for_handover' && 
-        order.claimed_by === currentVendorId &&
-        order.is_manifest === 1
-      );
-      
-      // Apply status filter if any statuses are selected (same logic as getFilteredOrdersForTab)
-      if (selectedStatuses.length > 0) {
-        handoverOrders = handoverOrders.filter(order => 
-          selectedStatuses.includes(order.status)
-        );
+      if (!hasFilters) {
+        // No filters applied - use absolute total from API (all pages) - this matches the card
+        console.log('🔢 TAB COUNT: No filters - using absolute total from API');
+        return groupedOrdersTotalQuantity;
+      } else {
+        // Filters applied - use all orders if available, otherwise use loaded pages
+        const useAllOrders = allGroupedOrders.length > 0;
+        const filteredOrders = getFilteredGroupedOrdersForTab(tabName, useAllOrders);
+        console.log('🔢 TAB COUNT: Filters applied - calculating from filtered orders');
+        console.log('🔢 TAB COUNT: Using all orders:', useAllOrders);
+        console.log('🔢 TAB COUNT: filteredOrders.length:', filteredOrders.length);
+        console.log('🔢 TAB COUNT: allGroupedOrders.length:', allGroupedOrders.length);
+        console.log('🔢 TAB COUNT: groupedOrders.length:', groupedOrders.length);
+        
+        // Calculate total quantity (product count) from filtered orders
+        const filteredTotal = filteredOrders.reduce((sum, order) => {
+          return sum + (order.total_quantity || 0);
+        }, 0);
+        
+        console.log('🔢 TAB COUNT: Filtered total quantity:', filteredTotal);
+        return filteredTotal;
       }
+    } else if (tabName === "handover") {
+      const tabFilter = tabFilters["handover"];
       
-      // Group orders by order_id for handover tab (same logic as getFilteredOrdersForTab)
-      const handoverGrouped = handoverOrders.reduce((acc: any, order) => {
-        const orderId = order.order_id;
-        if (!acc[orderId]) {
-          acc[orderId] = {
-            total_quantity: 0
-          };
-        }
-        acc[orderId].total_quantity += order.quantity || 0;
-        return acc;
-      }, {});
+      // Check if any filters are applied
+      const hasSearchFilter = tabFilter.searchTerm.trim().length > 0;
+      const hasDateFilter = tabFilter.dateFrom || tabFilter.dateTo;
+      const hasStatusFilter = selectedStatuses.length > 0;
+      const hasFilters = hasSearchFilter || hasDateFilter || hasStatusFilter;
       
-      return Object.values(handoverGrouped).reduce((sum: number, order: any) => {
-        return sum + (order.total_quantity || 0);
-      }, 0);
+      if (!hasFilters) {
+        // No filters applied - use absolute total from API (matches the card)
+        return handoverOrdersTotalQuantity;
+      } else {
+        // Filters applied - calculate from filtered orders
+        const filteredOrders = getFilteredHandoverOrders();
+        
+        // Calculate total quantity (product count) from filtered orders
+        const filteredTotal = filteredOrders.reduce((sum, order) => {
+          return sum + (order.total_quantity || 0);
+        }, 0);
+        
+        return filteredTotal;
+      }
+    } else if (tabName === "order-tracking") {
+      const tabFilter = tabFilters["order-tracking"];
+      
+      // Check if any filters are applied
+      const hasSearchFilter = tabFilter.searchTerm.trim().length > 0;
+      const hasDateFilter = tabFilter.dateFrom || tabFilter.dateTo;
+      const hasStatusFilter = selectedTrackingStatuses.length > 0;
+      const hasFilters = hasSearchFilter || hasDateFilter || hasStatusFilter;
+      
+      if (!hasFilters) {
+        // No filters applied - use absolute total from API (matches the card)
+        return trackingOrdersTotalQuantity;
+      } else {
+        // Filters applied - calculate from filtered orders
+        const filteredOrders = getFilteredTrackingOrders();
+        
+        // Calculate total quantity (product count) from filtered orders
+        const filteredTotal = filteredOrders.reduce((sum, order) => {
+          return sum + (order.total_quantity || 0);
+        }, 0);
+        
+        return filteredTotal;
+      }
     } else {
       // For All Orders tab, show filtered results (applies search, date filters)
       const filteredOrders = getFilteredOrdersForTab(tabName);
-      console.log('🔍 ALL ORDERS TAB DEBUG:');
-      console.log('  - Tab name:', tabName);
-      console.log('  - Filtered orders count:', filteredOrders.length);
-      console.log('  - Tab total quantity:', filteredOrders.reduce((sum, order) => {
-        return sum + (order.quantity || 0);
-      }, 0));
-      
-      // Debug: Check if there are any active filters
       const tabFilter = tabFilters[tabName as keyof typeof tabFilters];
-      console.log('  - Active filters:');
-      console.log('    - Search term:', tabFilter.searchTerm);
-      console.log('    - Date from:', tabFilter.dateFrom);
-      console.log('    - Date to:', tabFilter.dateTo);
       
-      // Debug: Compare with unfiltered count
-      const unfilteredUnclaimed = orders.filter(order => order.status === 'unclaimed');
-      console.log('  - Unfiltered unclaimed orders:', unfilteredUnclaimed.length);
-      console.log('  - Difference:', unfilteredUnclaimed.length - filteredOrders.length);
+      // Check if any filters are applied
+      const hasSearchFilter = tabFilter.searchTerm.trim().length > 0;
+      const hasDateFilter = tabFilter.dateFrom || tabFilter.dateTo;
+      const hasFilters = hasSearchFilter || hasDateFilter;
       
-      return filteredOrders.reduce((sum, order) => {
-        return sum + (order.quantity || 0);
-      }, 0);
+      if (!hasFilters) {
+        // No filters applied - use the same calculation as the card
+        const unclaimedOrders = orders.filter(order => order.status === 'unclaimed');
+        const uniqueUnclaimedOrders = ensureUniqueOrders(unclaimedOrders, 'unique_id');
+        return uniqueUnclaimedOrders.reduce((sum, order) => {
+          return sum + (order.quantity || 0);
+        }, 0);
+      } else {
+        // Filters applied - calculate from filtered orders
+        // Calculate total quantity (product count) from filtered orders
+        return filteredOrders.reduce((sum, order) => {
+          return sum + (order.quantity || 0);
+        }, 0);
+      }
     }
   };
 
-  // Helper function to get quantity sum for orders with labels downloaded
+  // Helper function to get quantity sum for selected orders with labels downloaded
   const getReadyOrdersQuantitySum = () => {
     const myOrders = getFilteredOrdersForTab("my-orders");
-    const readyOrders = myOrders.filter(order => 
-      order.label_downloaded === 1 || 
-      order.label_downloaded === '1' || 
-      order.label_downloaded === true
+    const selectedReadyOrders = myOrders.filter(order => 
+      selectedMyOrders.includes(order.order_id) &&
+      (order.label_downloaded === 1 || 
+       order.label_downloaded === '1' || 
+       order.label_downloaded === true)
     );
-    return readyOrders.reduce((sum, order) => {
+    return selectedReadyOrders.reduce((sum, order) => {
       return sum + (order.total_quantity || 0);
     }, 0);
   };
@@ -1817,6 +2484,7 @@ export function VendorDashboard() {
           "all-orders": { searchTerm: "", dateFrom: undefined, dateTo: undefined },
           "my-orders": { searchTerm: "", dateFrom: undefined, dateTo: undefined },
           "handover": { searchTerm: "", dateFrom: undefined, dateTo: undefined },
+          "order-tracking": { searchTerm: "", dateFrom: undefined, dateTo: undefined },
         });
         
         // Re-fetch all orders and grouped orders
@@ -1841,6 +2509,12 @@ export function VendorDashboard() {
             
             console.log('✅ FRONTEND: Grouped orders refreshed successfully');
           }
+
+          // Refresh Handover orders
+          await fetchHandoverOrders();
+
+          // Refresh Order Tracking orders
+          await fetchOrderTrackingOrders();
         } catch (refreshError) {
           console.log('⚠️ FRONTEND: Failed to refresh orders data, but Shipway sync was successful');
         }
@@ -1915,16 +2589,29 @@ export function VendorDashboard() {
               </>
             )}
 
-            {/* Mobile Menu Button */}
+            {/* Mobile Icons - Tracking and Menu */}
             {isMobile && (
-              <Button 
-                variant="ghost" 
-                size="sm"
-                onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-                className="p-2"
-              >
-                {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-              </Button>
+              <div className="flex items-center gap-2">
+                {/* Tracking Icon Button */}
+                <Button 
+                  variant="ghost" 
+                  size="sm"
+                  onClick={() => setActiveTab("order-tracking")}
+                  className="p-2"
+                  title="Order Tracking"
+                >
+                  <Truck className="w-5 h-5" />
+                </Button>
+                {/* Menu Button */}
+                <Button 
+                  variant="ghost" 
+                  size="sm"
+                  onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                  className="p-2"
+                >
+                  {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+                </Button>
+              </div>
             )}
           </div>
 
@@ -2032,16 +2719,21 @@ export function VendorDashboard() {
             </CardContent>
           </Card>
 
-          {/* Coming Soon Card - Placeholder */}
-          <Card className="bg-gradient-to-br from-gray-300 to-gray-400 text-gray-600 border-0 shadow-lg opacity-50">
+          {/* Order Tracking Card */}
+          <Card 
+            className={`bg-gradient-to-br from-purple-500 to-purple-600 text-white border-0 shadow-lg cursor-pointer hover:shadow-xl transition-all duration-200 hover:scale-[1.02] ${activeTab === "order-tracking" ? 'ring-2 ring-purple-300 ring-offset-2' : ''}`}
+            onClick={() => setActiveTab("order-tracking")}
+          >
             <CardContent className={`${isMobile ? 'p-2.5 sm:p-4' : 'p-6'}`}>
               <div className="flex items-center justify-between gap-1">
                 <div className="min-w-0 flex-1">
-                  <p className={`font-medium text-gray-500 opacity-90 truncate ${isMobile ? 'text-[10px] sm:text-xs' : 'text-sm'}`}>Coming Soon</p>
-                  <p className={`font-bold mt-0.5 sm:mt-1 truncate ${isMobile ? 'text-base sm:text-xl' : 'text-2xl'}`}>--</p>
+                  <p className={`font-medium text-purple-100 opacity-90 truncate ${isMobile ? 'text-[10px] sm:text-xs' : 'text-sm'}`}>Order Tracking</p>
+                  <p className={`font-bold mt-0.5 sm:mt-1 truncate ${isMobile ? 'text-base sm:text-xl' : 'text-2xl'}`}>
+                    {getTotalQuantitySumForTab("order-tracking")}
+                  </p>
                 </div>
                 <div className={`bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0 ${isMobile ? 'w-8 h-8 sm:w-10 sm:h-10' : 'w-12 h-12'}`}>
-                  <Settings className={`${isMobile ? 'w-4 h-4 sm:w-5 sm:h-5' : 'w-6 h-6'}`} />
+                  <Truck className={`${isMobile ? 'w-4 h-4 sm:w-5 sm:h-5' : 'w-6 h-6'}`} />
                 </div>
               </div>
             </CardContent>
@@ -2090,7 +2782,7 @@ export function VendorDashboard() {
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
               {/* Fixed Controls Section */}
               <div className={`sticky ${isMobile ? 'top-16' : 'top-20'} bg-white z-40 pb-3 sm:pb-4 border-b mb-3 sm:mb-4`}>
-                <TabsList className={`grid w-full grid-cols-3 ${isMobile ? 'h-auto mb-3 sm:mb-4' : 'mb-6'}`}>
+                <TabsList className={`grid w-full ${isMobile ? 'grid-cols-3' : 'grid-cols-4'} ${isMobile ? 'h-auto mb-3 sm:mb-4' : 'mb-6'}`}>
                   <TabsTrigger value="all-orders" className={`${isMobile ? 'text-xs sm:text-sm px-1.5 sm:px-2 py-2.5 sm:py-3' : ''}`}>
                     All ({getQuantitySumForTab("all-orders")})
                   </TabsTrigger>
@@ -2114,11 +2806,24 @@ export function VendorDashboard() {
                   >
                     Handover ({getQuantitySumForTab("handover")})
                   </TabsTrigger>
+                  {/* Order Tracking Tab - Desktop Only (Mobile users use the tracking icon in header) */}
+                  {!isMobile && (
+                    <TabsTrigger 
+                      value="order-tracking"
+                      className={`${
+                        highlightedTab === "order-tracking" 
+                          ? 'bg-purple-100 text-purple-700 border-purple-300 shadow-lg scale-105 transition-all duration-300' 
+                          : ''
+                      }`}
+                    >
+                      Order Tracking ({getQuantitySumForTab("order-tracking")})
+                    </TabsTrigger>
+                  )}
                 </TabsList>
 
                 {/* Filters */}
-                <div className={`flex flex-col gap-3 mb-2 md:mb-3 ${!isMobile && 'sm:flex-row sm:items-center'}`}>
-                  <div className="flex-1 min-w-0">
+                <div className={`flex flex-col gap-2 mb-2 md:mb-3 ${!isMobile && 'sm:flex-row sm:items-center'}`}>
+                  <div className="flex-1 min-w-[200px]">
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                       <Input
@@ -2155,7 +2860,7 @@ export function VendorDashboard() {
                   
                   {/* Status Filter - Desktop Only for Handover Tab */}
                   {!isMobile && activeTab === "handover" && (
-                    <div className="flex-1 min-w-0">
+                    <div className="w-[180px] flex-shrink-0">
                       <Select value={selectedStatuses.length > 0 ? selectedStatuses.join(',') : 'all'} onValueChange={(value) => {
                         if (value === 'all') {
                           setSelectedStatuses([]);
@@ -2178,6 +2883,31 @@ export function VendorDashboard() {
                     </div>
                   )}
                   
+                  {/* Status Filter - Desktop Only for Order Tracking Tab */}
+                  {!isMobile && activeTab === "order-tracking" && (
+                    <div className="w-[280px] flex-shrink-0">
+                      <Select value={selectedTrackingStatuses.length > 0 ? selectedTrackingStatuses.join(',') : 'all'} onValueChange={(value) => {
+                        if (value === 'all') {
+                          setSelectedTrackingStatuses([]);
+                        } else {
+                          setSelectedTrackingStatuses(value.split(','));
+                        }
+                      }}>
+                        <SelectTrigger className="w-full px-4 py-2">
+                          <SelectValue placeholder="Filter by Shipment Status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Statuses</SelectItem>
+                          {getUniqueTrackingStatuses().map((status) => (
+                            <SelectItem key={status} value={status}>
+                              {status.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                  
                   
                   <div className={`flex gap-2 items-center ${isMobile ? 'w-full' : ''}`}>
                     {/* Date Range Container - Responsive width */}
@@ -2186,14 +2916,14 @@ export function VendorDashboard() {
                         date={getCurrentTabFilters().dateFrom}
                         onDateChange={(date) => updateCurrentTabFilter('dateFrom', date)}
                         placeholder={isMobile ? "From" : "From date"}
-                        className={`${isMobile ? 'flex-1 min-w-0' : 'w-40'}`}
+                        className={`${isMobile ? 'flex-1 min-w-0' : 'w-36'}`}
                       />
                       <span className="text-gray-500 text-sm px-1 flex-shrink-0">to</span>
                       <DatePicker
                         date={getCurrentTabFilters().dateTo}
                         onDateChange={(date) => updateCurrentTabFilter('dateTo', date)}
                         placeholder={isMobile ? "To" : "To date"}
-                        className={`${isMobile ? 'flex-1 min-w-0' : 'w-40'}`}
+                        className={`${isMobile ? 'flex-1 min-w-0' : 'w-36'}`}
                       />
                     </div>
                     
@@ -2224,8 +2954,35 @@ export function VendorDashboard() {
                                 ))}
                               </SelectContent>
                             </Select>
+                          </div>
+                        )}
+                        
+                        {/* Status Filter for Order Tracking */}
+                        {activeTab === "order-tracking" && (
+                          <div className="relative">
+                            <Select value={selectedTrackingStatuses.length > 0 ? selectedTrackingStatuses.join(',') : 'all'} onValueChange={(value) => {
+                              if (value === 'all') {
+                                setSelectedTrackingStatuses([]);
+                              } else {
+                                setSelectedTrackingStatuses(value.split(','));
+                              }
+                            }}>
+                              <SelectTrigger className="w-12 h-10 px-2 py-2 border border-gray-300 rounded-md bg-white hover:bg-gray-50 flex items-center justify-center">
+                                <SelectValue>
+                                  <Filter className="w-5 h-5 text-gray-600" />
+                                </SelectValue>
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="all">All Statuses</SelectItem>
+                                {getUniqueTrackingStatuses().map((status) => (
+                                  <SelectItem key={status} value={status}>
+                                    {status.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
                             {/* Blue dot indicator when filter is active */}
-                            {selectedStatuses.length > 0 && (
+                            {selectedTrackingStatuses.length > 0 && (
                               <div className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full border-2 border-white"></div>
                             )}
                           </div>
@@ -2255,6 +3012,27 @@ export function VendorDashboard() {
                       </div>
                     )}
                   </div>
+                  
+                  {/* Bulk Manifest Download Button - Desktop Only for Handover Tab */}
+                  {!isMobile && activeTab === "handover" && (
+                    <Button
+                      onClick={handleBulkManifestDownload}
+                      disabled={selectedHandoverOrders.length === 0 || manifestDownloadLoading !== null}
+                      className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 h-10"
+                    >
+                      {manifestDownloadLoading !== null ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Downloading...
+                        </>
+                      ) : (
+                        <>
+                          <Download className="w-4 h-4 mr-2" />
+                          Manifest Download ({selectedHandoverOrders.length})
+                        </>
+                      )}
+                    </Button>
+                  )}
                   
                   {/* Tab-specific Actions */}
                   {activeTab === "all-orders" && !isMobile && (
@@ -2343,7 +3121,7 @@ export function VendorDashboard() {
                         ) : (
                           <>
                             <CheckCircle className="w-4 h-4 mr-2" />
-                            Mark Ready ({getReadyOrdersQuantitySum()})
+                            Mark Ready ({selectedMyOrders.length})
                           </>
                         )}
                       </Button>
@@ -2358,7 +3136,7 @@ export function VendorDashboard() {
               <div 
                 ref={scrollableContentRef}
                 onScroll={handleScroll}
-                className={`${isMobile ? `max-h-[calc(100vh-280px)] ${activeTab === 'my-orders' ? 'pb-32' : 'pb-20'}` : 'max-h-[600px]'} overflow-y-auto relative`}
+                className={`${isMobile ? `max-h-[calc(100vh-280px)] ${activeTab === 'my-orders' ? 'pb-32' : activeTab === 'order-tracking' ? 'pb-1' : 'pb-20'}` : 'max-h-[600px]'} overflow-y-auto relative`}
               >
                 <TabsContent value="all-orders" className="mt-0">
                   {/* Mobile Card Layout */}
@@ -2583,9 +3361,9 @@ export function VendorDashboard() {
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <h4 className="font-medium text-sm sm:text-base truncate">{order.order_id}</h4>
-                                    {order.status && (
-                                      <div className="text-xs font-medium text-blue-800 px-2 py-1 bg-blue-100 rounded-full border border-blue-200">
-                                        {order.status}
+                                    {(order.current_shipment_status || order.status) && (
+                                      <div className={`text-xs font-medium px-2 py-1 rounded-full ${getShipmentBadgeClasses(order.current_shipment_status || order.status)}`}>
+                                        {order.current_shipment_status || order.status}
                                       </div>
                                     )}
                                   </div>
@@ -2637,8 +3415,8 @@ export function VendorDashboard() {
                                 e.stopPropagation();
                                 handleRequestReverse(order.order_id, order.products?.map((p: any) => p.unique_id));
                               }}
-                              disabled={reverseLoading[order.order_id]}
-                              className="w-full text-xs h-8 border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700"
+                              disabled={reverseLoading[order.order_id] || isUnclaimDisabled(order)}
+                              className="w-full text-xs h-8 border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                               {reverseLoading[order.order_id] ? (
                                 <>
@@ -2804,8 +3582,14 @@ export function VendorDashboard() {
                                 </div>
                               </TableCell>
                               <TableCell>
-                               <span className="text-sm font-medium text-gray-800">{order.status || "N/A"}</span>
-                             </TableCell>
+                                {(order.current_shipment_status || order.status) ? (
+                                  <div className={`text-xs font-medium px-2 py-1 rounded-full inline-block ${getShipmentBadgeClasses(order.current_shipment_status || order.status)}`}>
+                                    {order.current_shipment_status || order.status}
+                                  </div>
+                                ) : (
+                                  <span className="text-sm font-medium text-gray-800">N/A</span>
+                                )}
+                              </TableCell>
                               <TableCell>
                                 <Button 
                                   size="sm" 
@@ -2814,8 +3598,8 @@ export function VendorDashboard() {
                                     e.stopPropagation();
                                     handleRequestReverse(order.order_id, order.products?.map((p: any) => p.unique_id));
                                   }}
-                                  disabled={reverseLoading[order.order_id]}
-                                  className="text-xs px-3 py-1 h-8"
+                                  disabled={reverseLoading[order.order_id] || isUnclaimDisabled(order)}
+                                  className="text-xs px-3 py-1 h-8 disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                   {reverseLoading[order.order_id] ? (
                                     <>
@@ -2856,23 +3640,45 @@ export function VendorDashboard() {
                 <TabsContent value="handover" className="mt-0">
                   {/* Mobile Card Layout */}
                   {isMobile ? (
-                    <div className="space-y-2.5 sm:space-y-3">
-                      {getFilteredOrdersForTab("handover").map((order, index) => (
-                        <Card key={`${order.order_id}-${index}`} className="p-2.5 sm:p-3">
+                    <div className="space-y-2.5 sm:space-y-3 pb-32">
+                      {getFilteredHandoverOrders().map((order, index) => (
+                        <Card 
+                          key={`${order.order_id}-${index}`} 
+                          className="p-2.5 sm:p-3 cursor-pointer transition-colors hover:bg-gray-50"
+                          onClick={() => {
+                            if (selectedHandoverOrders.includes(order.order_id)) {
+                              setSelectedHandoverOrders(selectedHandoverOrders.filter((id) => id !== order.order_id))
+                            } else {
+                              setSelectedHandoverOrders([...selectedHandoverOrders, order.order_id])
+                            }
+                          }}
+                        >
                           <div className="space-y-1.5 sm:space-y-2">
-                            {/* Top Row: Order Info | Total */}
+                            {/* Top Row: Checkbox | Order Info | Total */}
                             <div className="flex items-center justify-between gap-1.5 sm:gap-2">
                               <div className="flex items-center gap-1.5 sm:gap-2 flex-1 min-w-0">
+                                {/* Checkbox */}
+                                <input
+                                  type="checkbox"
+                                  checked={selectedHandoverOrders.includes(order.order_id)}
+                                  onChange={(e) => {
+                                    e.stopPropagation();
+                                    if (e.target.checked) {
+                                      setSelectedHandoverOrders([...selectedHandoverOrders, order.order_id]);
+                                    } else {
+                                      setSelectedHandoverOrders(selectedHandoverOrders.filter(id => id !== order.order_id));
+                                    }
+                                  }}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0"
+                                />
                                 {/* Order Info (with inline status badge) */}
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <h4 className="font-medium text-sm sm:text-base truncate">{order.order_id}</h4>
-                                    {order.status && (
-                                      <div className={`text-xs font-medium text-blue-800 py-0.5 bg-blue-100 rounded-full border border-blue-200 text-center ${
-                                        order.status.length <= 10 ? 'px-1.5' : 
-                                        order.status.length <= 20 ? 'px-2' : 'px-2.5'
-                                      }`}>
-                                        {order.status}
+                                    {(order.current_shipment_status || order.status) && (
+                                      <div className={`text-xs font-medium px-2 py-1 rounded-full ${getShipmentBadgeClasses(order.current_shipment_status || order.status)}`}>
+                                        {order.current_shipment_status || order.status}
                                       </div>
                                     )}
                                   </div>
@@ -2896,24 +3702,98 @@ export function VendorDashboard() {
                                     src={product.image || product.product_image || "/placeholder.svg"}
                                     alt={product.product_name}
                                     className="w-10 h-10 rounded-md object-cover cursor-pointer"
-                                    onClick={() => (product.image || product.product_image) && setSelectedImageProduct({url: product.image || product.product_image, title: product.product_name || "Product Image"})}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      (product.image || product.product_image) && setSelectedImageProduct({url: product.image || product.product_image, title: product.product_name || "Product Image"})
+                                    }}
                                     onError={(e) => {
                                       e.currentTarget.src = "/placeholder.svg";
                                     }}
                                   />
                                   <div className="flex-1 min-w-0">
-                                    <h5 className="font-medium text-sm break-words leading-relaxed">{product.product_name}</h5>
-                                    <p className="text-xs text-gray-500 break-words">Code: {product.product_code}</p>
+                                    <p className="text-xs font-medium break-words leading-relaxed">{product.product_name}</p>
+                                    <p className="text-xs text-gray-500 break-words leading-relaxed">Code: {product.product_code}</p>
                                   </div>
-                                  <div className="text-sm font-medium text-gray-700">
+                                  <div className="text-xs font-medium">
                                     {product.quantity || 0}
                                   </div>
                                 </div>
                               ))}
                             </div>
+                            
+                            {/* Action Buttons Row - Full Width at Bottom */}
+                            <div className="flex gap-2">
+                              <Button 
+                                size="sm" 
+                                variant="outline" 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const manifestId = order.manifest_id;
+                                  if (manifestId) {
+                                    downloadManifestSummary([manifestId]);
+                                  } else {
+                                    toast({
+                                      title: "Error",
+                                      description: "Manifest ID not found",
+                                      variant: "destructive",
+                                    });
+                                  }
+                                }}
+                                disabled={order.is_handover === 1 || manifestDownloadLoading === order.manifest_id}
+                                className="flex-1 text-xs h-8 border-green-300 text-green-600 hover:bg-green-50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                              >
+                                {manifestDownloadLoading === order.manifest_id ? (
+                                  <>
+                                    <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                    Downloading...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Download className="w-3 h-3 mr-1" />
+                                    Manifest
+                                  </>
+                                )}
+                              </Button>
+                              <Button 
+                                size="sm" 
+                                variant="outline" 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleRequestReverse(order.order_id, order.products?.map((p: any) => p.unique_id));
+                                }}
+                                disabled={reverseLoading[order.order_id] || isUnclaimDisabled(order)}
+                                className="flex-1 text-xs h-8 border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                {reverseLoading[order.order_id] ? (
+                                  <>
+                                    <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-red-600 mr-1"></div>
+                                    Unclaiming...
+                                  </>
+                                ) : (
+                                  'Unclaim Order'
+                                )}
+                              </Button>
+                            </div>
                           </div>
                         </Card>
                       ))}
+                      
+                      {/* Loading More Indicator for Mobile Handover */}
+                      {isLoadingMoreHandover && (
+                        <div className="flex items-center justify-center p-4">
+                          <div className="text-center">
+                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-green-600 mx-auto mb-2"></div>
+                            <p className="text-xs text-gray-500">Loading more orders...</p>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* End of List Indicator for Mobile Handover */}
+                      {!handoverOrdersHasMore && handoverOrders.length > 0 && (
+                        <div className="flex items-center justify-center p-4">
+                          <p className="text-xs text-gray-400">All orders loaded ({handoverOrdersTotalCount} total)</p>
+                        </div>
+                      )}
                     </div>
                   ) : (
                     /* Desktop/Tablet Table Layout */
@@ -2921,6 +3801,20 @@ export function VendorDashboard() {
                     <Table>
                       <TableHeader className="sticky top-0 bg-white z-30 shadow-sm border-b">
                         <TableRow>
+                          <TableHead className="w-12">
+                            <input
+                              type="checkbox"
+                              checked={selectedHandoverOrders.length === getFilteredHandoverOrders().length && getFilteredHandoverOrders().length > 0}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedHandoverOrders(getFilteredHandoverOrders().map((o: any) => o.order_id));
+                                } else {
+                                  setSelectedHandoverOrders([]);
+                                }
+                              }}
+                              className="w-4 h-4 cursor-pointer"
+                            />
+                          </TableHead>
                           <TableHead>Order ID</TableHead>
                           <TableHead>Order Date</TableHead>
                           <TableHead>Products</TableHead>
@@ -2930,8 +3824,23 @@ export function VendorDashboard() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {getFilteredOrdersForTab("handover").map((order, index) => (
+                        {getFilteredHandoverOrders().map((order, index) => (
                           <TableRow key={`${order.order_id}-${index}`}>
+                            <TableCell>
+                              <input
+                                type="checkbox"
+                                checked={selectedHandoverOrders.includes(order.order_id)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedHandoverOrders([...selectedHandoverOrders, order.order_id]);
+                                  } else {
+                                    setSelectedHandoverOrders(selectedHandoverOrders.filter(id => id !== order.order_id));
+                                  }
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                                className="w-4 h-4 cursor-pointer"
+                              />
+                            </TableCell>
                             <TableCell className="font-medium">{order.order_id}</TableCell>
                             <TableCell>
                               {order.order_date ? (
@@ -2984,22 +3893,91 @@ export function VendorDashboard() {
                               </div>
                             </TableCell>
                             <TableCell>
-                              {order.status && (
-                                <div className="text-xs font-medium text-blue-800 px-2 py-1 bg-blue-100 rounded-full border border-blue-200 inline-block">
-                                  {order.status}
+                              {(order.current_shipment_status || order.status) && (
+                                <div className={`text-xs font-medium px-2 py-1 rounded-full inline-block ${getShipmentBadgeClasses(order.current_shipment_status || order.status)}`}>
+                                  {order.current_shipment_status || order.status}
                                 </div>
                               )}
-                              {!order.status && (
+                              {!(order.current_shipment_status || order.status) && (
                                 <span className="text-sm font-medium text-gray-800">N/A</span>
                               )}
                             </TableCell>
                             <TableCell>
-                              <Badge variant="outline">Ready for Pickup</Badge>
+                              <div className="flex items-center gap-2">
+                                <Button 
+                                  size="sm" 
+                                  variant="outline"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    // Get manifest_id from order (should be available in handover tab)
+                                    const manifestId = order.manifest_id;
+                                    if (manifestId) {
+                                      downloadManifestSummary([manifestId]);
+                                    } else {
+                                      toast({
+                                        title: "Error",
+                                        description: "Manifest ID not found for this order",
+                                        variant: "destructive",
+                                      });
+                                    }
+                                  }}
+                                  disabled={order.is_handover === 1 || manifestDownloadLoading === order.manifest_id}
+                                  className="text-xs px-3 py-1 h-8 border-green-300 text-green-600 hover:bg-green-50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                                >
+                                  {manifestDownloadLoading === order.manifest_id ? (
+                                    <>
+                                      <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                      Downloading...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Download className="w-3 h-3 mr-1" />
+                                      Manifest
+                                    </>
+                                  )}
+                                </Button>
+                                <Button 
+                                  size="sm" 
+                                  variant="destructive" 
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleRequestReverse(order.order_id, order.products?.map((p: any) => p.unique_id));
+                                  }}
+                                  disabled={reverseLoading[order.order_id] || isUnclaimDisabled(order)}
+                                  className="text-xs px-3 py-1 h-8 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                  {reverseLoading[order.order_id] ? (
+                                    <>
+                                      <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-1"></div>
+                                      Loading...
+                                    </>
+                                  ) : (
+                                    'Unclaim'
+                                  )}
+                                </Button>
+                              </div>
                             </TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
                     </Table>
+                    
+                    {/* Loading More Indicator for Desktop Handover */}
+                    {isLoadingMoreHandover && (
+                      <div className="flex items-center justify-center p-6 border-t">
+                        <div className="text-center">
+                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600 mx-auto mb-2"></div>
+                          <p className="text-sm text-gray-500">Loading more orders...</p>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* End of List Indicator for Desktop Handover */}
+                    {!handoverOrdersHasMore && handoverOrders.length > 0 && (
+                      <div className="flex items-center justify-center p-4 border-t bg-gray-50">
+                        <p className="text-sm text-gray-500">All orders loaded ({handoverOrdersTotalCount} total)</p>
+                      </div>
+                    )}
                   </div>
                   )}
                 </TabsContent>
@@ -3086,18 +4064,22 @@ export function VendorDashboard() {
                       <Button 
                         onClick={() => handleBulkDownloadLabels("my-orders")}
                         disabled={selectedMyOrders.length === 0 || bulkDownloadLoading}
-                        className="flex-1 h-10 sm:h-12 text-sm sm:text-lg font-medium bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg min-w-0"
+                        className="flex-1 h-10 sm:h-12 text-xs sm:text-sm md:text-base font-medium bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg min-w-0 px-2 sm:px-3"
                       >
                         {bulkDownloadLoading ? (
                           <>
                             <div className={`animate-spin rounded-full border-b-2 border-white ${isMobile ? 'h-3 w-3 mr-1 sm:h-4 sm:w-4 sm:mr-2' : 'h-4 w-4 mr-2'}`}></div>
-                            <span className="truncate">{isMobile ? 'Loading' : 'Generating...'}</span>
+                            <span className="whitespace-nowrap">{isMobile ? 'Loading' : 'Generating...'}</span>
                           </>
                         ) : (
-                          <>
-                            <Download className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2 flex-shrink-0" />
-                            <span className="truncate">Download ({selectedMyOrders.length})</span>
-                          </>
+                          <div className="flex items-center justify-center w-full">
+                            <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5 mr-1 sm:mr-1.5 flex-shrink-0" />
+                            <span className="whitespace-nowrap flex items-center">
+                              <span className="hidden min-[360px]:inline">Download</span>
+                              <span className="inline min-[360px]:hidden">DL</span>
+                              <span className="ml-1">({selectedMyOrders.length})</span>
+                            </span>
+                          </div>
                         )}
                       </Button>
                       
@@ -3111,17 +4093,81 @@ export function VendorDashboard() {
                             .filter(order => selectedMyOrders.includes(order.order_id))
                             .some(order => !order.label_downloaded || order.label_downloaded === 0 || order.label_downloaded === '0' || order.label_downloaded === false)
                         }
-                        className="flex-1 h-10 sm:h-12 text-sm sm:text-lg font-medium bg-gradient-to-br from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 border-0 shadow-lg min-w-0"
+                        className="flex-1 h-10 sm:h-12 text-xs sm:text-sm md:text-base font-medium bg-gradient-to-br from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 border-0 shadow-lg min-w-0 px-2 sm:px-3"
                       >
                         {bulkMarkReadyLoading ? (
                           <>
                             <div className={`animate-spin rounded-full border-b-2 border-white ${isMobile ? 'h-3 w-3 mr-1 sm:h-4 sm:w-4 sm:mr-2' : 'h-4 w-4 mr-2'}`}></div>
-                            <span className="truncate">{isMobile ? 'Loading' : 'Processing...'}</span>
+                            <span className="whitespace-nowrap">{isMobile ? 'Loading' : 'Processing...'}</span>
+                          </>
+                        ) : (
+                          <div className="flex items-center justify-center w-full">
+                            <CheckCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5 mr-1 sm:mr-1.5 flex-shrink-0" />
+                            <span className="whitespace-nowrap flex items-center">
+                              <span>Ready</span>
+                              <span className="ml-1">({selectedMyOrders.length})</span>
+                            </span>
+                          </div>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Fixed Bottom Buttons for Mobile Handover */}
+              {isMobile && activeTab === "handover" && (
+                <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-2 sm:p-4 shadow-lg z-50">
+                  <div className="flex flex-col gap-2 sm:gap-3">
+                    {/* Select All Checkbox */}
+                    <div className="flex items-center gap-2 sm:gap-3 justify-end">
+                      <div className="flex items-center gap-1.5 sm:gap-2 whitespace-nowrap flex-shrink-0">
+                        <input
+                          type="checkbox"
+                          onChange={(e) => {
+                            const handoverOrders = getFilteredHandoverOrders()
+                            if (e.target.checked) {
+                              setSelectedHandoverOrders(handoverOrders.map((o) => o.order_id))
+                            } else {
+                              setSelectedHandoverOrders([])
+                            }
+                          }}
+                          checked={
+                            selectedHandoverOrders.length > 0 &&
+                            selectedHandoverOrders.length === getFilteredHandoverOrders().length
+                          }
+                          className="w-3.5 h-3.5 sm:w-4 sm:h-4"
+                        />
+                        <span className="text-sm sm:text-base font-medium">Select All</span>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-2 sm:gap-3">
+                      {/* Move to Top Button */}
+                      <Button
+                        onClick={scrollToTop}
+                        variant="outline"
+                        size="sm"
+                        className="h-9 w-9 sm:h-10 sm:w-10 p-0 rounded-full border-gray-300 hover:bg-gray-50 flex-shrink-0"
+                      >
+                        <ChevronUp className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                      </Button>
+                      
+                      {/* Bulk Manifest Download Button */}
+                      <Button 
+                        onClick={handleBulkManifestDownload}
+                        disabled={selectedHandoverOrders.length === 0 || manifestDownloadLoading !== null}
+                        className="flex-1 h-10 sm:h-12 text-sm sm:text-lg font-medium bg-gradient-to-br from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 border-0 shadow-lg min-w-0"
+                      >
+                        {manifestDownloadLoading !== null ? (
+                          <>
+                            <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2 flex-shrink-0 animate-spin" />
+                            <span className="truncate">{isMobile ? 'Loading' : 'Downloading...'}</span>
                           </>
                         ) : (
                           <>
-                            <CheckCircle className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2 flex-shrink-0" />
-                            <span className="truncate">Ready ({getReadyOrdersQuantitySum()})</span>
+                            <Download className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2 flex-shrink-0" />
+                            <span className="truncate">Manifest Download ({selectedHandoverOrders.length})</span>
                           </>
                         )}
                       </Button>
@@ -3130,8 +4176,8 @@ export function VendorDashboard() {
                 </div>
               )}
 
-              {/* Fixed Move to Top Button for Desktop All Orders, My Orders, and Handover */}
-              {!isMobile && (activeTab === "all-orders" || activeTab === "my-orders" || activeTab === "handover") && (
+              {/* Fixed Move to Top Button for Desktop All Orders, My Orders, Handover, and Order Tracking */}
+              {!isMobile && (activeTab === "all-orders" || activeTab === "my-orders" || activeTab === "handover" || activeTab === "order-tracking") && (
                 <Button
                   onClick={scrollToTop}
                   variant="outline"
@@ -3141,6 +4187,214 @@ export function VendorDashboard() {
                   <ChevronUp className="w-5 h-5" />
                 </Button>
               )}
+              
+              {/* Order Tracking Tab Content - Shows orders that have been in handover for 24+ hours */}
+              <TabsContent value="order-tracking" className="mt-0">
+                {trackingOrdersLoading ? (
+                  <div className="flex items-center justify-center py-12">
+                    <div className="text-center">
+                      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto mb-4"></div>
+                      <p className="text-gray-600">Loading order tracking data...</p>
+                    </div>
+                  </div>
+                ) : trackingOrdersError ? (
+                  <div className="flex items-center justify-center py-12">
+                    <div className="text-center">
+                      <p className="text-red-600">{trackingOrdersError}</p>
+                      <Button onClick={() => fetchOrderTrackingOrders()} className="mt-4">
+                        Retry
+                      </Button>
+                    </div>
+                  </div>
+                ) : isMobile ? (
+                  /* Mobile Card Layout */
+                  <div className="space-y-2.5 sm:space-y-3 pb-32 mt-4">
+                    {getFilteredTrackingOrders().length === 0 ? (
+                      <div className="flex flex-col items-center justify-center py-12">
+                        <Truck className="w-16 h-16 text-gray-300 mb-4" />
+                        <p className="text-gray-600 font-medium">No orders in tracking yet</p>
+                        <p className="text-sm text-gray-500 mt-2">Orders will appear here 24 hours after handover</p>
+                      </div>
+                    ) : (
+                      getFilteredTrackingOrders().map((order, index) => (
+                        <Card 
+                          key={`${order.order_id}-${index}`} 
+                          className="p-2.5 sm:p-3 transition-colors"
+                        >
+                          <div className="space-y-1.5 sm:space-y-2">
+                            {/* Top Row: Order Info | Total */}
+                            <div className="flex items-center justify-between gap-1.5 sm:gap-2">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <h4 className="font-medium text-sm sm:text-base truncate">{order.order_id}</h4>
+                                  {(order.current_shipment_status || order.status) && (
+                                    <div className={`text-xs font-medium px-2 py-1 rounded-full ${getShipmentBadgeClasses(order.current_shipment_status || order.status)}`}>
+                                      {order.current_shipment_status || order.status}
+                                    </div>
+                                  )}
+                                </div>
+                                <p className="text-xs sm:text-sm text-gray-500 truncate">
+                                  {order.order_date ? new Date(order.order_date).toLocaleDateString() : "N/A"}
+                                </p>
+                                {order.products?.[0]?.awb && (
+                                  <p className="text-xs font-mono text-purple-600 truncate">
+                                    AWB: {order.products[0].awb}
+                                  </p>
+                                )}
+                              </div>
+                              {/* Total Count - Right aligned */}
+                              <div className="text-right flex-shrink-0">
+                                <div className="text-sm text-gray-500">Total</div>
+                                <div className="text-xl font-bold text-purple-600">{order.total_quantity || 0}</div>
+                              </div>
+                            </div>
+                            
+                            {/* Products List */}
+                            <div className="space-y-2">
+                              {order.products && order.products.map((product: any) => (
+                                <div key={product.unique_id} className="flex items-center gap-2 p-2 bg-gray-50 rounded-lg">
+                                  <img
+                                    src={product.image || product.product_image || "/placeholder.svg"}
+                                    alt={product.product_name}
+                                    className="w-10 h-10 rounded-md object-cover cursor-pointer"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      (product.image || product.product_image) && setSelectedImageProduct({url: product.image || product.product_image, title: product.product_name || "Product Image"})
+                                    }}
+                                    onError={(e) => {
+                                      e.currentTarget.src = "/placeholder.svg";
+                                    }}
+                                  />
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-xs font-medium break-words leading-relaxed">{product.product_name}</p>
+                                    <p className="text-xs text-gray-500 break-words leading-relaxed">Code: {product.product_code}</p>
+                                  </div>
+                                  <div className="text-right flex-shrink-0">
+                                    <p className="text-xs font-medium">{product.quantity || 0}</p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </Card>
+                      ))
+                    )}
+                    
+                    {/* Total count indicator for Order Tracking */}
+                    {trackingOrders.length > 0 && (
+                      <div className="flex items-center justify-center p-4">
+                        <p className="text-xs text-gray-400">Showing all {trackingOrdersTotalCount} orders</p>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  /* Desktop Table Layout */
+                  <div className="border rounded-lg overflow-hidden">
+                    <Table>
+                      <TableHeader className="sticky top-0 bg-white z-30 shadow-sm border-b">
+                        <TableRow>
+                          <TableHead className="font-semibold">Order ID</TableHead>
+                          <TableHead className="font-semibold">Order Date</TableHead>
+                          <TableHead className="font-semibold">Products</TableHead>
+                          <TableHead className="font-semibold">AWB Number</TableHead>
+                          <TableHead className="font-semibold text-center">Count</TableHead>
+                          <TableHead className="font-semibold">Shipment Status</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {getFilteredTrackingOrders().length === 0 ? (
+                          <TableRow>
+                            <TableCell colSpan={6} className="h-64 text-center">
+                              <div className="flex flex-col items-center justify-center">
+                                <Truck className="w-16 h-16 text-gray-300 mb-4" />
+                                <p className="text-gray-600 font-medium">No orders in tracking yet</p>
+                                <p className="text-sm text-gray-500 mt-2">Orders will appear here 24 hours after handover</p>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          getFilteredTrackingOrders().map((order, index) => (
+                            <TableRow key={`${order.order_id}-${index}`} className="hover:bg-gray-50">
+                              <TableCell className="font-medium">{order.order_id}</TableCell>
+                              <TableCell>
+                                {order.order_date ? (
+                                  <div className="flex flex-col">
+                                    <span className="text-sm font-medium">
+                                      {new Date(order.order_date).toLocaleDateString()}
+                                    </span>
+                                    <span className="text-xs text-gray-500">
+                                      {new Date(order.order_date).toLocaleTimeString()}
+                                    </span>
+                                  </div>
+                                ) : "N/A"}
+                              </TableCell>
+                              <TableCell>
+                                <div className="space-y-2">
+                                  {order.products && order.products.map((product: any, productIndex: number) => (
+                                    <div key={product.unique_id || productIndex} className="flex items-center gap-3">
+                                      <TooltipProvider>
+                                        <Tooltip>
+                                          <TooltipTrigger asChild>
+                                            <img
+                                              src={product.image || product.product_image || "/placeholder.svg"}
+                                              alt={product.product_name}
+                                              className="w-10 h-10 rounded-md object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                                              onClick={() => (product.image || product.product_image) && setSelectedImageProduct({url: product.image || product.product_image, title: product.product_name || "Product Image"})}
+                                              onError={(e) => {
+                                                e.currentTarget.src = "/placeholder.svg";
+                                              }}
+                                            />
+                                          </TooltipTrigger>
+                                          <TooltipContent>
+                                            <p>Click to view full image</p>
+                                          </TooltipContent>
+                                        </Tooltip>
+                                      </TooltipProvider>
+                                      <div className="flex-1 min-w-0">
+                                        <div className="font-medium text-sm break-words leading-relaxed">{product.product_name}</div>
+                                        <div className="text-xs text-gray-500 break-words">Code: {product.product_code}</div>
+                                      </div>
+                                      <div className="text-sm font-medium text-gray-700">
+                                        {product.quantity || 0}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                <div className="font-mono text-sm text-purple-600">
+                                  {order.products?.[0]?.awb || 'N/A'}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-center">
+                                <div className="text-base font-bold text-purple-600">
+                                  {order.total_quantity || 0}
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                {(order.current_shipment_status || order.status) ? (
+                                  <div className={`text-xs font-medium px-2 py-1 rounded-full inline-block ${getShipmentBadgeClasses(order.current_shipment_status || order.status)}`}>
+                                    {order.current_shipment_status || order.status}
+                                  </div>
+                                ) : (
+                                  <span className="text-sm font-medium text-gray-800">N/A</span>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          ))
+                        )}
+                      </TableBody>
+                    </Table>
+                    
+                    {/* Total count indicator for Desktop Order Tracking */}
+                    {trackingOrders.length > 0 && (
+                      <div className="flex items-center justify-center p-4 border-t bg-gray-50">
+                        <p className="text-sm text-gray-500">Showing all {trackingOrdersTotalCount} orders</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </TabsContent>
             </Tabs>
           </CardContent>
         </Card>

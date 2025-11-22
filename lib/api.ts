@@ -383,9 +383,10 @@ class ApiClient {
     });
   }
 
-  async claimOrder(unique_id: string): Promise<ApiResponse> {
+  async claimOrder(unique_id: string, quantity_to_claim?: number): Promise<ApiResponse> {
     console.log('🔵 API CLIENT: claimOrder called');
     console.log('  - unique_id:', unique_id);
+    console.log('  - quantity_to_claim:', quantity_to_claim);
     
     // Use vendor token for claim endpoint
     const vendorToken = localStorage.getItem('vendorToken')
@@ -396,8 +397,13 @@ class ApiClient {
       throw new Error('No vendor token found. Please login again.')
     }
 
+    const requestBody: any = { unique_id };
+    if (quantity_to_claim !== undefined) {
+      requestBody.quantity_to_claim = quantity_to_claim;
+    }
+
     console.log('📤 API CLIENT: Making request to /orders/claim');
-    console.log('  - Body:', JSON.stringify({ unique_id }));
+    console.log('  - Body:', JSON.stringify(requestBody));
 
     return this.makeRequest('/orders/claim', {
       method: 'POST',
@@ -405,7 +411,7 @@ class ApiClient {
         'Content-Type': 'application/json',
         'Authorization': vendorToken
       },
-      body: JSON.stringify({ unique_id }),
+      body: JSON.stringify(requestBody),
     })
   }
 
@@ -460,6 +466,59 @@ class ApiClient {
     console.log('  - Query params: page=' + page + ', limit=' + limit);
 
     return this.makeRequest(`/orders/grouped?page=${page}&limit=${limit}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': vendorToken
+      },
+    })
+  }
+
+  async getHandoverOrders(page: number = 1, limit: number = 50): Promise<ApiResponse> {
+    console.log('🔵 API CLIENT: getHandoverOrders called');
+    console.log('  - page:', page);
+    console.log('  - limit:', limit);
+    
+    // Use vendor token for handover orders endpoint
+    const vendorToken = localStorage.getItem('vendorToken')
+    console.log('🔑 API CLIENT: Token check');
+    console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
+    
+    if (!vendorToken) {
+      console.log('❌ API CLIENT: No vendor token found');
+      throw new Error('No vendor token found. Please login again.')
+    }
+
+    console.log('📤 API CLIENT: Making request to /orders/handover');
+    console.log('  - Method: GET');
+    console.log('  - Headers: Authorization');
+    console.log('  - Query params: page=' + page + ', limit=' + limit);
+
+    return this.makeRequest(`/orders/handover?page=${page}&limit=${limit}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': vendorToken
+      },
+    })
+  }
+
+  async getOrderTrackingOrders(): Promise<ApiResponse> {
+    console.log('🔵 API CLIENT: getOrderTrackingOrders called');
+    
+    // Use vendor token for order tracking endpoint
+    const vendorToken = localStorage.getItem('vendorToken')
+    console.log('🔑 API CLIENT: Token check');
+    console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
+    
+    if (!vendorToken) {
+      console.log('❌ API CLIENT: No vendor token found');
+      throw new Error('No vendor token found. Please login again.')
+    }
+
+    console.log('📤 API CLIENT: Making request to /orders/order-tracking');
+    console.log('  - Method: GET');
+    console.log('  - Headers: Authorization');
+
+    return this.makeRequest(`/orders/order-tracking`, {
       method: 'GET',
       headers: {
         'Authorization': vendorToken
