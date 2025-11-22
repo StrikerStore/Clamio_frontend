@@ -691,18 +691,45 @@ export function VendorDashboard() {
 
   const handleClaimOrder = async (unique_id: string) => {
     console.log('🔵 FRONTEND: Starting claim process');
-    console.log('  - unique_id:', unique_id);
+    console.log('  - Frontend unique_id:', unique_id);
     console.log('  - vendorToken from localStorage:', localStorage.getItem('vendorToken')?.substring(0, 8) + '...');
     
-    // Find the order to get the original_unique_id (for split orders)
-    const order = orders.find(o => o.unique_id === unique_id);
-    const backendUniqueId = order?.original_unique_id || unique_id;
-    const originalQuantity = order?.original_quantity || 1;
-    const quantityToClaim = order?.quantity || 1; // This will be 1 for split orders
+    // Find the order - first try in filtered/split orders (all-orders tab), then in original orders
+    // This is necessary because split orders only exist in the filtered result
+    let order = getFilteredOrdersForTab("all-orders").find((o: any) => o.unique_id === unique_id);
     
-    console.log('  - Using backend unique_id:', backendUniqueId);
-    console.log('  - Original quantity:', originalQuantity);
-    console.log('  - Quantity to claim:', quantityToClaim);
+    // If not found in filtered orders, try original orders (shouldn't happen in all-orders tab)
+    if (!order) {
+      order = orders.find(o => o.unique_id === unique_id);
+    }
+    
+    if (!order) {
+      console.error('❌ FRONTEND: Order not found in local state');
+      console.error('  - Looking for unique_id:', unique_id);
+      console.error('  - Tried in filtered orders and original orders');
+      toast({
+        title: 'Error',
+        description: 'Order not found. Please refresh the page.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    
+    // For split orders (quantity > 1 originally), use original_unique_id
+    // For non-split orders (quantity = 1), unique_id and original_unique_id should be the same
+    const backendUniqueId = order.original_unique_id || order.unique_id;
+    const originalQuantity = order.original_quantity || order.quantity || 1;
+    const quantityToClaim = order.quantity || 1; // This will be 1 for split orders
+    
+    console.log('  - Backend unique_id (for database lookup):', backendUniqueId);
+    console.log('  - Original quantity in database:', originalQuantity);
+    console.log('  - Quantity to claim (for this specific unit):', quantityToClaim);
+    console.log('  - Order details:', JSON.stringify({
+      frontend_unique_id: order.unique_id,
+      backend_unique_id: backendUniqueId,
+      is_split: order.unique_id !== backendUniqueId,
+      unit_index: order.unit_index
+    }));
     
     try {
       console.log('📤 FRONTEND: Calling apiClient.claimOrder...');
@@ -1178,16 +1205,27 @@ export function VendorDashboard() {
     ordersList.forEach(order => {
       const quantity = order.quantity || 1;
       
-      // Split each order into individual units
-      for (let i = 0; i < quantity; i++) {
+      // If quantity is 1, don't split - just return the order as-is
+      if (quantity === 1) {
         splitOrders.push({
           ...order,
-          quantity: 1, // Each row represents 1 unit
-          original_unique_id: order.unique_id, // Store original unique_id for backend
-          unique_id: `${order.unique_id}_unit_${i + 1}`, // Make unique_id truly unique for each unit
-          original_quantity: quantity, // Store original quantity for reference
-          unit_index: i + 1 // Track which unit this is (1-based)
+          // Don't modify unique_id for single quantity orders
+          // This ensures the original unique_id is used
+          original_unique_id: order.unique_id, // Store for consistency
+          original_quantity: 1
         });
+      } else {
+        // Split orders with quantity > 1 into individual units
+        for (let i = 0; i < quantity; i++) {
+          splitOrders.push({
+            ...order,
+            quantity: 1, // Each row represents 1 unit
+            original_unique_id: order.unique_id, // Store original unique_id for backend
+            unique_id: `${order.unique_id}_unit_${i + 1}`, // Make unique_id truly unique for each unit
+            original_quantity: quantity, // Store original quantity for reference
+            unit_index: i + 1 // Track which unit this is (1-based)
+          });
+        }
       }
     });
     
