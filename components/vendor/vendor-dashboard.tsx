@@ -694,9 +694,19 @@ export function VendorDashboard() {
     console.log('  - unique_id:', unique_id);
     console.log('  - vendorToken from localStorage:', localStorage.getItem('vendorToken')?.substring(0, 8) + '...');
     
+    // Find the order to get the original_unique_id (for split orders)
+    const order = orders.find(o => o.unique_id === unique_id);
+    const backendUniqueId = order?.original_unique_id || unique_id;
+    const originalQuantity = order?.original_quantity || 1;
+    const quantityToClaim = order?.quantity || 1; // This will be 1 for split orders
+    
+    console.log('  - Using backend unique_id:', backendUniqueId);
+    console.log('  - Original quantity:', originalQuantity);
+    console.log('  - Quantity to claim:', quantityToClaim);
+    
     try {
       console.log('📤 FRONTEND: Calling apiClient.claimOrder...');
-      const response = await apiClient.claimOrder(unique_id);
+      const response = await apiClient.claimOrder(backendUniqueId, quantityToClaim);
       
       console.log('📥 FRONTEND: Response received');
       console.log('  - success:', response.success);
@@ -706,21 +716,14 @@ export function VendorDashboard() {
       if (response.success && response.data) {
         console.log('✅ FRONTEND: Claim successful, updating UI');
         
-        // Update the order in the orders array with the new data
-        setOrders((prevOrders) =>
-          prevOrders.map((order) =>
-            order.unique_id === unique_id ? { ...order, ...response.data } : order
-          )
-        );
-        
-        // Show success message with order_id
+        // Show success message with order_id and quantity
         const claimedOrderId = response.data.order_id || unique_id;
         toast({
           title: 'Order Claimed',
-          description: `Claimed order id ${claimedOrderId}`,
+          description: `Claimed ${quantityToClaim} unit${quantityToClaim > 1 ? 's' : ''} of order ${claimedOrderId}`,
         });
         
-                // Refresh orders to ensure tabs are updated correctly
+        // Refresh orders to ensure tabs are updated correctly and show the latest state
         console.log('🔄 FRONTEND: Refreshing orders to update tab filtering...');
         try {
           await refreshOrders();
@@ -1168,6 +1171,29 @@ export function VendorDashboard() {
     return uniqueOrders;
   };
 
+  // Helper function to split orders by quantity (each unit becomes a separate row)
+  const splitOrdersByQuantity = (ordersList: any[]) => {
+    const splitOrders: any[] = [];
+    
+    ordersList.forEach(order => {
+      const quantity = order.quantity || 1;
+      
+      // Split each order into individual units
+      for (let i = 0; i < quantity; i++) {
+        splitOrders.push({
+          ...order,
+          quantity: 1, // Each row represents 1 unit
+          original_unique_id: order.unique_id, // Store original unique_id for backend
+          unique_id: `${order.unique_id}_unit_${i + 1}`, // Make unique_id truly unique for each unit
+          original_quantity: quantity, // Store original quantity for reference
+          unit_index: i + 1 // Track which unit this is (1-based)
+        });
+      }
+    });
+    
+    return splitOrders;
+  };
+
   // Filter orders based on active tab and search/date filters
   const getFilteredOrdersForTab = (tab: string) => {
     if (tab === "my-orders") {
@@ -1184,6 +1210,8 @@ export function VendorDashboard() {
       case "all-orders":
         // Show only unclaimed orders
         baseOrders = orders.filter(order => order.status === 'unclaimed');
+        // Split orders by quantity so each unit can be claimed individually
+        baseOrders = splitOrdersByQuantity(baseOrders);
         break;
       case "handover":
         // Show orders ready for handover by current vendor with is_manifest = 1
@@ -2084,16 +2112,67 @@ export function VendorDashboard() {
     console.log('🔵 FRONTEND: Starting bulk claim process');
     console.log('  - selected orders:', selectedUnclaimedOrders);
 
+    // Group selected orders by original_unique_id and calculate total quantity for each
+    const orderGroups = new Map<string, { unique_id: string, total_quantity: number }>();
+    
+    selectedUnclaimedOrders.forEach(uniqueId => {
+      const order = orders.find(o => o.unique_id === uniqueId);
+      const backendUniqueId = order?.original_unique_id || uniqueId;
+      const quantity = order?.quantity || 1;
+      
+      if (orderGroups.has(backendUniqueId)) {
+        const existing = orderGroups.get(backendUniqueId)!;
+        existing.total_quantity += quantity;
+      } else {
+        orderGroups.set(backendUniqueId, {
+          unique_id: backendUniqueId,
+          total_quantity: quantity
+        });
+      }
+    });
+
+    // Create an array of claim requests with quantities
+    const claimRequests = Array.from(orderGroups.values());
+    
+    console.log('  - grouped claim requests:', claimRequests);
+    console.log('  - total unique orders to claim:', claimRequests.length);
+
     try {
-      console.log('📤 FRONTEND: Calling apiClient.bulkClaimOrders...');
-      const response = await apiClient.bulkClaimOrders(selectedUnclaimedOrders);
+      console.log('📤 FRONTEND: Processing bulk claims...');
+      
+      // Process each claim request individually
+      let successCount = 0;
+      let failCount = 0;
+      
+      for (const request of claimRequests) {
+        try {
+          const response = await apiClient.claimOrder(request.unique_id, request.total_quantity);
+          if (response.success) {
+            successCount++;
+          } else {
+            failCount++;
+          }
+        } catch (error) {
+          console.error(`Failed to claim ${request.unique_id}:`, error);
+          failCount++;
+        }
+      }
+      
+      const response = {
+        success: true,
+        message: 'Bulk claim completed',
+        data: {
+          total_successful: successCount,
+          total_failed: failCount
+        }
+      };
       
       console.log('📥 FRONTEND: Bulk claim response received');
       console.log('  - success:', response.success);
       console.log('  - data:', response.data);
       
       if (response.success && response.data) {
-        const { successful_claims, failed_claims, total_successful, total_failed } = response.data;
+        const { total_successful, total_failed } = response.data;
         
         console.log('✅ FRONTEND: Bulk claim successful');
         console.log('  - Successful:', total_successful);
@@ -2102,7 +2181,7 @@ export function VendorDashboard() {
         // Show success message
         toast({
           title: "Bulk Claim Complete",
-          description: `Successfully claimed ${total_successful} orders${total_failed > 0 ? `. ${total_failed} orders failed to claim.` : ''}`,
+          description: `Successfully claimed ${total_successful} product${total_successful !== 1 ? 's' : ''}${total_failed > 0 ? `. ${total_failed} failed to claim.` : ''}`,
         });
         
         // Clear selected orders
