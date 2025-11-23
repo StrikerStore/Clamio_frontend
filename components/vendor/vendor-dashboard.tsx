@@ -715,25 +715,22 @@ export function VendorDashboard() {
       return;
     }
     
-    // For split orders (quantity > 1 originally), use original_unique_id
-    // For non-split orders (quantity = 1), unique_id and original_unique_id should be the same
-    const backendUniqueId = order.original_unique_id || order.unique_id;
-    const originalQuantity = order.original_quantity || order.quantity || 1;
-    const quantityToClaim = order.quantity || 1; // This will be 1 for split orders
+    // NOTE: Backend now handles splitting, so each row has quantity=1 and unique unique_id
+    const uniqueId = order.unique_id;
+    const quantityToClaim = order.quantity || 1; // Should always be 1 since backend splits
     
-    console.log('  - Backend unique_id (for database lookup):', backendUniqueId);
-    console.log('  - Original quantity in database:', originalQuantity);
-    console.log('  - Quantity to claim (for this specific unit):', quantityToClaim);
+    console.log('  - unique_id:', uniqueId);
+    console.log('  - Quantity to claim:', quantityToClaim);
     console.log('  - Order details:', JSON.stringify({
-      frontend_unique_id: order.unique_id,
-      backend_unique_id: backendUniqueId,
-      is_split: order.unique_id !== backendUniqueId,
-      unit_index: order.unit_index
+      unique_id: uniqueId,
+      order_id: order.order_id,
+      product_code: order.product_code,
+      quantity: quantityToClaim
     }));
     
     try {
       console.log('📤 FRONTEND: Calling apiClient.claimOrder...');
-      const response = await apiClient.claimOrder(backendUniqueId, quantityToClaim);
+      const response = await apiClient.claimOrder(uniqueId, quantityToClaim);
       
       console.log('📥 FRONTEND: Response received');
       console.log('  - success:', response.success);
@@ -1198,39 +1195,9 @@ export function VendorDashboard() {
     return uniqueOrders;
   };
 
-  // Helper function to split orders by quantity (each unit becomes a separate row)
-  const splitOrdersByQuantity = (ordersList: any[]) => {
-    const splitOrders: any[] = [];
-    
-    ordersList.forEach(order => {
-      const quantity = order.quantity || 1;
-      
-      // If quantity is 1, don't split - just return the order as-is
-      if (quantity === 1) {
-        splitOrders.push({
-          ...order,
-          // Don't modify unique_id for single quantity orders
-          // This ensures the original unique_id is used
-          original_unique_id: order.unique_id, // Store for consistency
-          original_quantity: 1
-        });
-      } else {
-        // Split orders with quantity > 1 into individual units
-        for (let i = 0; i < quantity; i++) {
-          splitOrders.push({
-            ...order,
-            quantity: 1, // Each row represents 1 unit
-            original_unique_id: order.unique_id, // Store original unique_id for backend
-            unique_id: `${order.unique_id}_unit_${i + 1}`, // Make unique_id truly unique for each unit
-            original_quantity: quantity, // Store original quantity for reference
-            unit_index: i + 1 // Track which unit this is (1-based)
-          });
-        }
-      }
-    });
-    
-    return splitOrders;
-  };
+  // NOTE: Order splitting by quantity is now handled by the backend
+  // Each order row in the database represents exactly 1 unit
+  // No need for frontend splitting logic anymore
 
   // Filter orders based on active tab and search/date filters
   const getFilteredOrdersForTab = (tab: string) => {
@@ -1247,9 +1214,8 @@ export function VendorDashboard() {
     switch (tab) {
       case "all-orders":
         // Show only unclaimed orders
+        // NOTE: Each row from backend already represents 1 unit (splitting done in backend)
         baseOrders = orders.filter(order => order.status === 'unclaimed');
-        // Split orders by quantity so each unit can be claimed individually
-        baseOrders = splitOrdersByQuantity(baseOrders);
         break;
       case "handover":
         // Show orders ready for handover by current vendor with is_manifest = 1
@@ -2150,30 +2116,10 @@ export function VendorDashboard() {
     console.log('🔵 FRONTEND: Starting bulk claim process');
     console.log('  - selected orders:', selectedUnclaimedOrders);
 
-    // Group selected orders by original_unique_id and calculate total quantity for each
-    const orderGroups = new Map<string, { unique_id: string, total_quantity: number }>();
+    // NOTE: Backend now handles splitting, so each unique_id is independent with quantity=1
+    // No need to group or calculate quantities anymore
     
-    selectedUnclaimedOrders.forEach(uniqueId => {
-      const order = orders.find(o => o.unique_id === uniqueId);
-      const backendUniqueId = order?.original_unique_id || uniqueId;
-      const quantity = order?.quantity || 1;
-      
-      if (orderGroups.has(backendUniqueId)) {
-        const existing = orderGroups.get(backendUniqueId)!;
-        existing.total_quantity += quantity;
-      } else {
-        orderGroups.set(backendUniqueId, {
-          unique_id: backendUniqueId,
-          total_quantity: quantity
-        });
-      }
-    });
-
-    // Create an array of claim requests with quantities
-    const claimRequests = Array.from(orderGroups.values());
-    
-    console.log('  - grouped claim requests:', claimRequests);
-    console.log('  - total unique orders to claim:', claimRequests.length);
+    console.log('  - total orders to claim:', selectedUnclaimedOrders.length);
 
     try {
       console.log('📤 FRONTEND: Processing bulk claims...');
@@ -2182,16 +2128,16 @@ export function VendorDashboard() {
       let successCount = 0;
       let failCount = 0;
       
-      for (const request of claimRequests) {
+      for (const uniqueId of selectedUnclaimedOrders) {
         try {
-          const response = await apiClient.claimOrder(request.unique_id, request.total_quantity);
+          const response = await apiClient.claimOrder(uniqueId, 1); // Always 1 since backend splits
           if (response.success) {
             successCount++;
           } else {
             failCount++;
           }
         } catch (error) {
-          console.error(`Failed to claim ${request.unique_id}:`, error);
+          console.error(`Failed to claim ${uniqueId}:`, error);
           failCount++;
         }
       }
