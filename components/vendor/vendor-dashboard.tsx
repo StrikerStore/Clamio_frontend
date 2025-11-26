@@ -691,46 +691,12 @@ export function VendorDashboard() {
 
   const handleClaimOrder = async (unique_id: string) => {
     console.log('🔵 FRONTEND: Starting claim process');
-    console.log('  - Frontend unique_id:', unique_id);
+    console.log('  - unique_id:', unique_id);
     console.log('  - vendorToken from localStorage:', localStorage.getItem('vendorToken')?.substring(0, 8) + '...');
-    
-    // Find the order - first try in filtered/split orders (all-orders tab), then in original orders
-    // This is necessary because split orders only exist in the filtered result
-    let order = getFilteredOrdersForTab("all-orders").find((o: any) => o.unique_id === unique_id);
-    
-    // If not found in filtered orders, try original orders (shouldn't happen in all-orders tab)
-    if (!order) {
-      order = orders.find(o => o.unique_id === unique_id);
-    }
-    
-    if (!order) {
-      console.error('❌ FRONTEND: Order not found in local state');
-      console.error('  - Looking for unique_id:', unique_id);
-      console.error('  - Tried in filtered orders and original orders');
-      toast({
-        title: 'Error',
-        description: 'Order not found. Please refresh the page.',
-        variant: 'destructive',
-      });
-      return;
-    }
-    
-    // NOTE: Backend now handles splitting, so each row has quantity=1 and unique unique_id
-    const uniqueId = order.unique_id;
-    const quantityToClaim = order.quantity || 1; // Should always be 1 since backend splits
-    
-    console.log('  - unique_id:', uniqueId);
-    console.log('  - Quantity to claim:', quantityToClaim);
-    console.log('  - Order details:', JSON.stringify({
-      unique_id: uniqueId,
-      order_id: order.order_id,
-      product_code: order.product_code,
-      quantity: quantityToClaim
-    }));
     
     try {
       console.log('📤 FRONTEND: Calling apiClient.claimOrder...');
-      const response = await apiClient.claimOrder(uniqueId, quantityToClaim);
+      const response = await apiClient.claimOrder(unique_id);
       
       console.log('📥 FRONTEND: Response received');
       console.log('  - success:', response.success);
@@ -740,14 +706,21 @@ export function VendorDashboard() {
       if (response.success && response.data) {
         console.log('✅ FRONTEND: Claim successful, updating UI');
         
-        // Show success message with order_id and quantity
+        // Update the order in the orders array with the new data
+        setOrders((prevOrders) =>
+          prevOrders.map((order) =>
+            order.unique_id === unique_id ? { ...order, ...response.data } : order
+          )
+        );
+        
+        // Show success message with order_id
         const claimedOrderId = response.data.order_id || unique_id;
         toast({
           title: 'Order Claimed',
-          description: `Claimed ${quantityToClaim} unit${quantityToClaim > 1 ? 's' : ''} of order ${claimedOrderId}`,
+          description: `Claimed order id ${claimedOrderId}`,
         });
         
-        // Refresh orders to ensure tabs are updated correctly and show the latest state
+                // Refresh orders to ensure tabs are updated correctly
         console.log('🔄 FRONTEND: Refreshing orders to update tab filtering...');
         try {
           await refreshOrders();
@@ -1195,10 +1168,6 @@ export function VendorDashboard() {
     return uniqueOrders;
   };
 
-  // NOTE: Order splitting by quantity is now handled by the backend
-  // Each order row in the database represents exactly 1 unit
-  // No need for frontend splitting logic anymore
-
   // Filter orders based on active tab and search/date filters
   const getFilteredOrdersForTab = (tab: string) => {
     if (tab === "my-orders") {
@@ -1214,7 +1183,6 @@ export function VendorDashboard() {
     switch (tab) {
       case "all-orders":
         // Show only unclaimed orders
-        // NOTE: Each row from backend already represents 1 unit (splitting done in backend)
         baseOrders = orders.filter(order => order.status === 'unclaimed');
         break;
       case "handover":
@@ -2116,47 +2084,16 @@ export function VendorDashboard() {
     console.log('🔵 FRONTEND: Starting bulk claim process');
     console.log('  - selected orders:', selectedUnclaimedOrders);
 
-    // NOTE: Backend now handles splitting, so each unique_id is independent with quantity=1
-    // No need to group or calculate quantities anymore
-    
-    console.log('  - total orders to claim:', selectedUnclaimedOrders.length);
-
     try {
-      console.log('📤 FRONTEND: Processing bulk claims...');
-      
-      // Process each claim request individually
-      let successCount = 0;
-      let failCount = 0;
-      
-      for (const uniqueId of selectedUnclaimedOrders) {
-        try {
-          const response = await apiClient.claimOrder(uniqueId, 1); // Always 1 since backend splits
-          if (response.success) {
-            successCount++;
-          } else {
-            failCount++;
-          }
-        } catch (error) {
-          console.error(`Failed to claim ${uniqueId}:`, error);
-          failCount++;
-        }
-      }
-      
-      const response = {
-        success: true,
-        message: 'Bulk claim completed',
-        data: {
-          total_successful: successCount,
-          total_failed: failCount
-        }
-      };
+      console.log('📤 FRONTEND: Calling apiClient.bulkClaimOrders...');
+      const response = await apiClient.bulkClaimOrders(selectedUnclaimedOrders);
       
       console.log('📥 FRONTEND: Bulk claim response received');
       console.log('  - success:', response.success);
       console.log('  - data:', response.data);
       
       if (response.success && response.data) {
-        const { total_successful, total_failed } = response.data;
+        const { successful_claims, failed_claims, total_successful, total_failed } = response.data;
         
         console.log('✅ FRONTEND: Bulk claim successful');
         console.log('  - Successful:', total_successful);
@@ -2165,7 +2102,7 @@ export function VendorDashboard() {
         // Show success message
         toast({
           title: "Bulk Claim Complete",
-          description: `Successfully claimed ${total_successful} product${total_successful !== 1 ? 's' : ''}${total_failed > 0 ? `. ${total_failed} failed to claim.` : ''}`,
+          description: `Successfully claimed ${total_successful} orders${total_failed > 0 ? `. ${total_failed} orders failed to claim.` : ''}`,
         });
         
         // Clear selected orders
@@ -2493,8 +2430,8 @@ export function VendorDashboard() {
           <div className="flex items-center justify-between py-3 sm:py-4 gap-2 sm:gap-4">
             {/* Dashboard Name and Welcome */}
             <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-lg flex items-center justify-center flex-shrink-0">
-                <img src="/logo.png" alt="Claimio Logo" className="w-full h-full object-contain" />
+              <div className="w-8 h-8 sm:w-10 sm:h-10 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center flex-shrink-0">
+                <Settings className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
               </div>
               <div className="min-w-0">
                 <h1 className={`font-bold text-gray-900 truncate ${isMobile ? 'text-base sm:text-xl' : 'text-2xl'}`}>

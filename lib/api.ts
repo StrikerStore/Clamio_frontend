@@ -383,10 +383,9 @@ class ApiClient {
     });
   }
 
-  async claimOrder(unique_id: string, quantity_to_claim?: number): Promise<ApiResponse> {
+  async claimOrder(unique_id: string): Promise<ApiResponse> {
     console.log('🔵 API CLIENT: claimOrder called');
     console.log('  - unique_id:', unique_id);
-    console.log('  - quantity_to_claim:', quantity_to_claim);
     
     // Use vendor token for claim endpoint
     const vendorToken = localStorage.getItem('vendorToken')
@@ -397,13 +396,8 @@ class ApiClient {
       throw new Error('No vendor token found. Please login again.')
     }
 
-    const requestBody: any = { unique_id };
-    if (quantity_to_claim !== undefined) {
-      requestBody.quantity_to_claim = quantity_to_claim;
-    }
-
     console.log('📤 API CLIENT: Making request to /orders/claim');
-    console.log('  - Body:', JSON.stringify(requestBody));
+    console.log('  - Body:', JSON.stringify({ unique_id }));
 
     return this.makeRequest('/orders/claim', {
       method: 'POST',
@@ -411,7 +405,7 @@ class ApiClient {
         'Content-Type': 'application/json',
         'Authorization': vendorToken
       },
-      body: JSON.stringify(requestBody),
+      body: JSON.stringify({ unique_id }),
     })
   }
 
