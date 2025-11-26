@@ -2430,12 +2430,12 @@ export function VendorDashboard() {
           <div className="flex items-center justify-between py-3 sm:py-4 gap-2 sm:gap-4">
             {/* Dashboard Name and Welcome */}
             <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-              <div className="w-8 h-8 sm:w-10 sm:h-10 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center flex-shrink-0">
-                <Settings className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-lg flex items-center justify-center flex-shrink-0">
+                <img src="/logo.png" alt="CLAIMIO Logo" className="w-full h-full object-contain" />
               </div>
               <div className="min-w-0">
                 <h1 className={`font-bold text-gray-900 truncate ${isMobile ? 'text-base sm:text-xl' : 'text-2xl'}`}>
-                  {isMobile ? 'Clamio - Vendor' : 'Clamio - Vendor'}
+                  {isMobile ? 'CLAIMIO - Vendor' : 'CLAIMIO - Vendor'}
                 </h1>
                 {!isMobile && (
                 <p className="text-sm sm:text-base text-gray-600 truncate">
