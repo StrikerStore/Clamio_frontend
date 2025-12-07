@@ -24,6 +24,11 @@ import { Textarea } from "@/components/ui/textarea"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { DatePicker } from "@/components/ui/date-picker"
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
+import {
   Accordion,
   AccordionContent,
   AccordionItem,
@@ -58,11 +63,12 @@ import {
   ExternalLink,
   Menu,
   X,
+  Store,
 } from "lucide-react"
 import { useAuth } from "@/components/auth/auth-provider"
 import { useToast } from "@/hooks/use-toast"
 import { apiClient } from "@/lib/api"
-import { useEffect, useMemo } from "react"
+import { useEffect, useMemo, useRef } from "react"
 import { useDeviceType } from "@/hooks/use-mobile"
 import { InventoryAggregation } from "@/components/admin/inventory/inventory-aggregation"
 import { NotificationDialog } from "./notification-dialog"
@@ -184,6 +190,8 @@ export function AdminDashboard() {
   const [dateFrom, setDateFrom] = useState<Date | undefined>(undefined)
   const [dateTo, setDateTo] = useState<Date | undefined>(undefined)
   const [selectedOrders, setSelectedOrders] = useState<string[]>([])
+  const [selectedVendorFilters, setSelectedVendorFilters] = useState<string[]>([])
+  const [selectedStoreFilters, setSelectedStoreFilters] = useState<string[]>([])
   const [selectedVendors, setSelectedVendors] = useState<string[]>([])
   const [selectedCarriers, setSelectedCarriers] = useState<string[]>([])
   const [showVendorModal, setShowVendorModal] = useState(false)
@@ -336,8 +344,11 @@ export function AdminDashboard() {
   const [movingCarrier, setMovingCarrier] = useState<string | null>(null)
   // Carrier edit dialog state
   const [carrierEditState, setCarrierEditState] = useState<{ open: boolean; carrierId: string | null; carrier_id: string; status: string }>({ open: false, carrierId: null, carrier_id: "", status: "active" })
+  // Store filter state
+  const [stores, setStores] = useState<any[]>([])
+  const [selectedStoreFilter, setSelectedStoreFilter] = useState<string>("")
 
-  const { isMobile } = useDeviceType()
+  const { isMobile, isTablet } = useDeviceType()
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
 
   const getStatusBadge = (status: string) => {
@@ -403,11 +414,11 @@ export function AdminDashboard() {
 
     // Handle undefined or null status
     if (!status) {
-      return <Badge className="bg-gray-100 text-gray-800 text-xs sm:text-sm truncate">UNKNOWN</Badge>
+      return <Badge className="bg-gray-100 text-gray-800 text-xs truncate">UNKNOWN</Badge>
     }
 
     return (
-      <Badge className={`${colors[status as keyof typeof colors] || "bg-gray-100 text-gray-800"} text-xs sm:text-sm truncate max-w-full`}>
+      <Badge className={`${colors[status as keyof typeof colors] || "bg-gray-100 text-gray-800"} text-xs sm:text-sm truncate max-w-full px-1.5 py-0.5`}>
         {displayNames[status as keyof typeof displayNames] || status.replace("_", " ").toUpperCase()}
       </Badge>
     )
@@ -435,10 +446,10 @@ export function AdminDashboard() {
 
     // Handle undefined or null priority
     if (!priority) {
-      return <Badge className="bg-gray-100 text-gray-800">Priority N/A</Badge>
+      return <Badge className="bg-gray-100 text-gray-800 text-xs">Priority N/A</Badge>
     }
 
-    return <Badge className={colors[priority as keyof typeof colors] || "bg-gray-100 text-gray-800"}>Priority {priority}</Badge>
+    return <Badge className={`${colors[priority as keyof typeof colors] || "bg-gray-100 text-gray-800"} text-xs`}>Priority {priority}</Badge>
   }
 
   // Get unique status values from orders data
@@ -452,10 +463,20 @@ export function AdminDashboard() {
     return Array.from(uniqueStatuses).sort();
   }
 
+  const getUniqueVendorNames = () => {
+    const uniqueVendors = new Set<string>();
+    orders.forEach(order => {
+      if (order.vendor_name && order.vendor_name.trim() !== '' && order.vendor_name !== 'Unclaimed') {
+        uniqueVendors.add(order.vendor_name);
+      }
+    });
+    return Array.from(uniqueVendors).sort();
+  }
+
   const getFilteredOrdersForTab = (tab: string) => {
     const baseOrders = orders
 
-    // Apply search, status, and date filters
+    // Apply search, status, date, vendor, and store filters
     return baseOrders.filter((order) => {
       const matchesSearch =
         order.order_id?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -463,6 +484,15 @@ export function AdminDashboard() {
         order.vendor_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         order.product_name?.toLowerCase().includes(searchTerm.toLowerCase())
       const matchesStatus = statusFilter === "all" || order.status === statusFilter
+      
+      // Vendor filter - multiple selection
+      const matchesVendor = selectedVendorFilters.length === 0 || 
+        selectedVendorFilters.includes(order.vendor_name) ||
+        (selectedVendorFilters.includes('Unclaimed') && (!order.vendor_name || order.vendor_name === 'Unclaimed'))
+      
+      // Store filter - multiple selection
+      const matchesStore = selectedStoreFilters.length === 0 || 
+        selectedStoreFilters.includes(order.account_code)
       
       // Date filtering
       let matchesDate = true;
@@ -480,8 +510,16 @@ export function AdminDashboard() {
         }
       }
       
-      return matchesSearch && matchesStatus && matchesDate
+      return matchesSearch && matchesStatus && matchesDate && matchesVendor && matchesStore
     })
+  }
+
+  const getFilteredOrdersQuantity = (tab: string) => {
+    const filteredOrders = getFilteredOrdersForTab(tab);
+    return filteredOrders.reduce((sum: number, order: any) => {
+      const qty = parseInt(order.quantity) || 1;
+      return sum + qty;
+    }, 0);
   }
 
   const getFilteredVendors = () => {
@@ -495,6 +533,11 @@ export function AdminDashboard() {
   }
 
   const getFilteredCarriers = () => {
+    // If no store is selected, return empty array (don't show any carriers)
+    if (!selectedStoreFilter) {
+      return [];
+    }
+
     let filtered = carriers.filter((carrier) => {
       const matchesSearch =
         carrier.carrier_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -502,7 +545,11 @@ export function AdminDashboard() {
       const carrierStatus = (carrier.status || '').toString().trim().toLowerCase()
       const filterStatus = (statusFilter || '').toString().trim().toLowerCase()
       const matchesStatus = filterStatus === "all" || carrierStatus === filterStatus
-      return matchesSearch && matchesStatus
+      
+      // Store filter - MUST match selected store (required, no "all" option)
+      const matchesStore = carrier.account_code === selectedStoreFilter
+      
+      return matchesSearch && matchesStatus && matchesStore
     })
 
     // Sort by priority (1st priority comes first)
@@ -884,16 +931,43 @@ export function AdminDashboard() {
   };
 
   // Fetch orders for admin panel
-  const fetchOrders = async () => {
+  const fetchOrders = async (syncFromShipway = false) => {
     setOrdersLoading(true);
     try {
+      // If syncFromShipway is true, sync orders from Shipway first
+      if (syncFromShipway) {
+        try {
+          const syncResponse = await apiClient.refreshAdminOrders();
+          if (syncResponse.success) {
+            toast({
+              title: "Orders Synced",
+              description: syncResponse.message || "Orders have been synced from Shipway successfully",
+            });
+          } else {
+            toast({
+              title: "Sync Warning",
+              description: syncResponse.message || "Orders sync completed with warnings",
+              variant: "default",
+            });
+          }
+        } catch (syncError) {
+          console.error('Error syncing orders:', syncError);
+          toast({
+            title: "Sync Error",
+            description: syncError instanceof Error ? syncError.message : "Failed to sync orders from Shipway",
+            variant: "destructive",
+          });
+          // Continue to fetch orders even if sync fails
+        }
+      }
+
       const response = await apiClient.getAdminOrders();
       
       if (response.success) {
         const ordersData = response.data.orders;
         setOrders(ordersData);
         
-        // Calculate stats by summing quantities instead of counting orders
+        // Calculate stats by summing quantities
         const totalQuantity = ordersData.reduce((sum: number, order: any) => {
           const qty = parseInt(order.quantity) || 1;
           return sum + qty;
@@ -958,9 +1032,18 @@ export function AdminDashboard() {
       return; // Prevent multiple simultaneous moves
     }
     
+    if (!selectedStoreFilter) {
+      toast({
+        title: 'Error',
+        description: 'Please select a store first',
+        variant: 'destructive'
+      });
+      return;
+    }
+    
     setMovingCarrier(carrierId);
     try {
-      const res = await apiClient.moveCarrier(carrierId, direction);
+      const res = await apiClient.moveCarrier(carrierId, direction, selectedStoreFilter);
       if (!res.success) {
         throw new Error(res.message);
       }
@@ -976,12 +1059,34 @@ export function AdminDashboard() {
     }
   };
 
-  // Auto-load orders when component mounts
+  // Auto-load orders when component mounts (only once on initial load)
   useEffect(() => {
     fetchOrders();
     fetchVendors();
-    fetchCarriers();
+    fetchStores(); // Fetch stores first for carrier filtering
   }, []);
+
+  // Fetch carriers after stores are loaded and a store is selected
+  useEffect(() => {
+    if (stores.length > 0 && selectedStoreFilter) {
+      fetchCarriers();
+    }
+  }, [stores, selectedStoreFilter]);
+
+  // Note: Removed automatic order refresh on:
+  // - Window visibility change (was causing frequent refreshes)
+  // - Tab switching (was causing refreshes on every navigation)
+  // Orders now only refresh:
+  // 1. On initial component mount
+  // 2. When user clicks the refresh button
+  // 3. When cron job triggers a refresh (via refresh button or manual trigger)
+
+  // Ensure a store is selected when stores are loaded
+  useEffect(() => {
+    if (stores.length > 0 && !selectedStoreFilter) {
+      setSelectedStoreFilter(stores[0].account_code);
+    }
+  }, [stores]);
 
   // Fetch vendors for assignment dropdown
   const fetchVendors = async () => {
@@ -1009,9 +1114,15 @@ export function AdminDashboard() {
   };
 
   const fetchCarriers = async () => {
+    // Don't fetch if no store is selected
+    if (!selectedStoreFilter) {
+      setCarriers([]);
+      return;
+    }
+
     setCarriersLoading(true);
     try {
-      const response = await apiClient.getCarriers();
+      const response = await apiClient.getCarriers(selectedStoreFilter);
       if (response.success) {
         console.log('Carriers data received:', response.data);
         setCarriers(response.data.carriers);
@@ -1031,6 +1142,26 @@ export function AdminDashboard() {
       });
     } finally {
       setCarriersLoading(false);
+    }
+  };
+
+  // Fetch stores for filtering
+  const fetchStores = async () => {
+    try {
+      const response = await apiClient.getStoresForFilter();
+      
+      if (response.success && response.data) {
+        setStores(response.data);
+        // Automatically select the first store
+        if (response.data.length > 0) {
+          const firstStoreCode = response.data[0].account_code;
+          setSelectedStoreFilter(firstStoreCode);
+        }
+      } else {
+        console.error('Failed to fetch stores:', response.message);
+      }
+    } catch (error: any) {
+      console.error('Error fetching stores:', error);
     }
   };
 
@@ -1161,8 +1292,19 @@ export function AdminDashboard() {
       return;
     }
 
+    // Find vendor name
+    const vendor = vendors.find(v => v.warehouseId === vendorToAssign);
+    const vendorName = vendor?.name || vendorToAssign;
+
     // Set loading state for this order
     setAssignLoading(prev => ({ ...prev, [orderToAssign.unique_id]: true }));
+
+    // Optimistically update the order state immediately
+    setOrders(prevOrders => prevOrders.map(o => 
+      o.unique_id === orderToAssign.unique_id 
+        ? { ...o, vendor_name: vendorName, status: 'claimed' }
+        : o
+    ));
 
     try {
       const response = await apiClient.assignOrderToVendor(
@@ -1183,8 +1325,15 @@ export function AdminDashboard() {
           setSelectedVendorId("");
         }
         
-        fetchOrders(); // Refresh orders list
+        // Refresh orders list to get latest data from server
+        await fetchOrders();
       } else {
+        // Revert optimistic update on failure
+        setOrders(prevOrders => prevOrders.map(o => 
+          o.unique_id === orderToAssign.unique_id 
+            ? { ...o, vendor_name: orderToAssign.vendor_name, status: orderToAssign.status }
+            : o
+        ));
         toast({
           title: "Assignment Failed",
           description: response.message,
@@ -1192,6 +1341,12 @@ export function AdminDashboard() {
         });
       }
     } catch (error) {
+      // Revert optimistic update on error
+      setOrders(prevOrders => prevOrders.map(o => 
+        o.unique_id === orderToAssign.unique_id 
+          ? { ...o, vendor_name: orderToAssign.vendor_name, status: orderToAssign.status }
+          : o
+      ));
       toast({
         title: "Error",
         description: "Failed to assign order",
@@ -1208,6 +1363,17 @@ export function AdminDashboard() {
     // Set loading state for this order
     setUnassignLoading(prev => ({ ...prev, [order.unique_id]: true }));
 
+    // Store original values for potential revert
+    const originalVendorName = order.vendor_name;
+    const originalStatus = order.status;
+
+    // Optimistically update the order state immediately
+    setOrders(prevOrders => prevOrders.map(o => 
+      o.unique_id === order.unique_id 
+        ? { ...o, vendor_name: 'Unclaimed', status: 'unclaimed' }
+        : o
+    ));
+
     try {
       const response = await apiClient.unassignOrder(order.unique_id);
 
@@ -1216,8 +1382,15 @@ export function AdminDashboard() {
           title: "Order Unassigned",
           description: response.message,
         });
-        fetchOrders(); // Refresh orders list
+        // Refresh orders list to get latest data from server
+        await fetchOrders();
       } else {
+        // Revert optimistic update on failure
+        setOrders(prevOrders => prevOrders.map(o => 
+          o.unique_id === order.unique_id 
+            ? { ...o, vendor_name: originalVendorName, status: originalStatus }
+            : o
+        ));
         toast({
           title: "Unassignment Failed",
           description: response.message,
@@ -1225,6 +1398,12 @@ export function AdminDashboard() {
         });
       }
     } catch (error) {
+      // Revert optimistic update on error
+      setOrders(prevOrders => prevOrders.map(o => 
+        o.unique_id === order.unique_id 
+          ? { ...o, vendor_name: originalVendorName, status: originalStatus }
+          : o
+      ));
       toast({
         title: "Error",
         description: "Failed to unassign order",
@@ -1271,11 +1450,13 @@ export function AdminDashboard() {
       const formatInfo = await apiClient.getCarrierFormat();
       if (formatInfo.success) {
         const confirmed = window.confirm(
-          `CSV Upload Requirements:\n\n` +
-          `• Expected columns: ${formatInfo.data.expectedColumns.join(', ')}\n` +
-          `• Total carriers required: ${formatInfo.data.totalCarriers}\n` +
-          `• All existing carrier IDs must be included\n` +
-          `• Priority values must be unique\n\n` +
+          `CSV Upload Requirements (Multi-Store):\n\n` +
+          `• Expected columns: ${formatInfo.data.expectedColumns.join(', ')}, account_code\n` +
+          `• CSV must include "account_code" column for each carrier\n` +
+          `• CSV can contain carriers from multiple stores\n` +
+          `• All existing carrier IDs for each store must be included\n` +
+          `• Priority values must be unique within each store\n` +
+          `• Same carrier_id can appear multiple times if they belong to different stores\n\n` +
           `Do you want to proceed with the upload?`
         );
         
@@ -1342,8 +1523,8 @@ export function AdminDashboard() {
                 <img src="/logo.png" alt="CLAIMIO Logo" className="w-full h-full object-contain" />
               </div>
               <div className="min-w-0">
-                <h1 className="text-lg sm:text-2xl font-bold text-gray-900 truncate">CLAIMIO - Admin</h1>
-                {!isMobile && <p className="text-base text-gray-600 truncate">Welcome back, {user?.name}</p>}
+                <h1 className={`font-bold text-gray-900 truncate ${isMobile ? 'text-base sm:text-xl' : 'text-2xl'}`}>CLAIMIO - Admin</h1>
+                {!isMobile && <p className="text-sm sm:text-base text-gray-600 truncate">Welcome back, {user?.name}</p>}
               </div>
             </div>
 
@@ -1366,7 +1547,7 @@ export function AdminDashboard() {
                 </Button>
                 
                 <div className="text-right">
-                  <p className="text-base font-medium text-gray-900 truncate max-w-[120px]">{user?.name}</p>
+                  <p className="text-sm sm:text-base font-medium text-gray-900 truncate max-w-[120px]">{user?.name}</p>
                   <p className="text-sm text-gray-500 break-all max-w-[200px]">{user?.email}</p>
                 </div>
                 <Button 
@@ -1380,7 +1561,7 @@ export function AdminDashboard() {
               </div>
             )}
 
-            {/* Mobile: Notification Bell and Menu Button */}
+            {/* Mobile: Notification Bell, Inventory Icon and Menu Button */}
             {isMobile && (
               <div className="flex items-center space-x-2">
                 {/* Notification Bell */}
@@ -1399,6 +1580,20 @@ export function AdminDashboard() {
                       {notificationStats.pending > 99 ? '99+' : notificationStats.pending}
                     </span>
                   )}
+                </Button>
+
+                {/* Inventory Icon */}
+                <Button 
+                  variant="ghost" 
+                  size="sm"
+                  onClick={() => {
+                    setActiveTab('inventory');
+                    setIsMobileMenuOpen(false);
+                  }}
+                  className={`p-2 ${activeTab === 'inventory' ? 'bg-blue-50 text-blue-600' : ''}`}
+                  title="Inventory"
+                >
+                  <Package className="w-5 h-5" />
                 </Button>
                 
                 {/* Menu Button */}
@@ -1437,9 +1632,13 @@ export function AdminDashboard() {
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-8 py-4 sm:py-6">
+      <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-8 py-3 sm:py-4 md:py-8">
         {/* Stats Cards - compact, colorful, 2x2 on mobile */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3 md:gap-6 mb-4 md:mb-8">
+        <div className={`grid gap-2 sm:gap-4 md:gap-6 mb-4 sm:mb-6 md:mb-8 ${
+          isMobile ? 'grid-cols-2' : 
+          isTablet ? 'grid-cols-2' : 
+          'grid-cols-4'
+        }`}>
           <Card 
             className={`bg-gradient-to-br from-blue-500 to-blue-600 text-white border-0 shadow-lg ${isMobile ? 'cursor-pointer hover:shadow-xl transition-all duration-200 active:scale-95' : ''}`}
             onClick={() => {
@@ -1449,14 +1648,14 @@ export function AdminDashboard() {
               }
             }}
           >
-            <CardContent className="p-2.5 sm:p-4 md:p-6">
+            <CardContent className={`${isMobile ? 'p-2.5 sm:p-4' : 'p-6'}`}>
               <div className="flex items-center justify-between gap-1">
                 <div className="min-w-0 flex-1">
-                  <p className="text-[10px] sm:text-xs md:text-sm font-medium text-blue-100 opacity-90 truncate">Total Orders</p>
-                  <p className="text-base sm:text-xl md:text-2xl font-bold mt-0.5 sm:mt-1 truncate">{ordersStats.totalOrders}</p>
+                  <p className={`font-medium text-blue-100 opacity-90 truncate ${isMobile ? 'text-[10px] sm:text-xs' : 'text-sm'}`}>Total Orders</p>
+                  <p className={`font-bold mt-0.5 sm:mt-1 truncate ${isMobile ? 'text-base sm:text-xl' : 'text-2xl'}`}>{ordersStats.totalOrders}</p>
                 </div>
-                <div className="w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <Package className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6" />
+                <div className={`bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0 ${isMobile ? 'w-8 h-8 sm:w-10 sm:h-10' : 'w-12 h-12'}`}>
+                  <Package className={`${isMobile ? 'w-4 h-4 sm:w-5 sm:h-5' : 'w-6 h-6'}`} />
                 </div>
               </div>
             </CardContent>
@@ -1472,16 +1671,16 @@ export function AdminDashboard() {
               }
             }}
           >
-            <CardContent className="p-2.5 sm:p-4 md:p-6">
+            <CardContent className={`${isMobile ? 'p-2.5 sm:p-4' : 'p-6'}`}>
               <div className="flex items-center justify-between gap-1">
                 <div className="min-w-0 flex-1">
-                  <p className="text-[10px] sm:text-xs md:text-sm font-medium text-green-100 opacity-90 truncate">Claimed</p>
-                  <p className="text-base sm:text-xl md:text-2xl font-bold mt-0.5 sm:mt-1 truncate">
+                  <p className={`font-medium text-green-100 opacity-90 truncate ${isMobile ? 'text-[10px] sm:text-xs' : 'text-sm'}`}>Claimed</p>
+                  <p className={`font-bold mt-0.5 sm:mt-1 truncate ${isMobile ? 'text-base sm:text-xl' : 'text-2xl'}`}>
                     {ordersStats.claimedOrders}
                   </p>
                 </div>
-                <div className="w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <Package className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6" />
+                <div className={`bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0 ${isMobile ? 'w-8 h-8 sm:w-10 sm:h-10' : 'w-12 h-12'}`}>
+                  <Package className={`${isMobile ? 'w-4 h-4 sm:w-5 sm:h-5' : 'w-6 h-6'}`} />
                 </div>
               </div>
             </CardContent>
@@ -1496,16 +1695,16 @@ export function AdminDashboard() {
               }
             }}
           >
-            <CardContent className="p-2.5 sm:p-4 md:p-6">
+            <CardContent className={`${isMobile ? 'p-2.5 sm:p-4' : 'p-6'}`}>
               <div className="flex items-center justify-between gap-1">
                 <div className="min-w-0 flex-1">
-                  <p className="text-[10px] sm:text-xs md:text-sm font-medium text-orange-100 opacity-90 truncate">Unclaimed</p>
-                  <p className="text-base sm:text-xl md:text-2xl font-bold mt-0.5 sm:mt-1 truncate">
+                  <p className={`font-medium text-orange-100 opacity-90 truncate ${isMobile ? 'text-[10px] sm:text-xs' : 'text-sm'}`}>Unclaimed</p>
+                  <p className={`font-bold mt-0.5 sm:mt-1 truncate ${isMobile ? 'text-base sm:text-xl' : 'text-2xl'}`}>
                     {ordersStats.unclaimedOrders}
                   </p>
                 </div>
-                <div className="w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <Clock className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6" />
+                <div className={`bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0 ${isMobile ? 'w-8 h-8 sm:w-10 sm:h-10' : 'w-12 h-12'}`}>
+                  <Clock className={`${isMobile ? 'w-4 h-4 sm:w-5 sm:h-5' : 'w-6 h-6'}`} />
                 </div>
               </div>
             </CardContent>
@@ -1521,16 +1720,16 @@ export function AdminDashboard() {
               }
             }}
           >
-            <CardContent className="p-2.5 sm:p-4 md:p-6">
+            <CardContent className={`${isMobile ? 'p-2.5 sm:p-4' : 'p-6'}`}>
               <div className="flex items-center justify-between gap-1">
                 <div className="min-w-0 flex-1">
-                  <p className="text-[10px] sm:text-xs md:text-sm font-medium text-purple-100 opacity-90 truncate">Vendors</p>
-                  <p className="text-base sm:text-xl md:text-2xl font-bold mt-0.5 sm:mt-1 truncate">
+                  <p className={`font-medium text-purple-100 opacity-90 truncate ${isMobile ? 'text-[10px] sm:text-xs' : 'text-sm'}`}>Vendors</p>
+                  <p className={`font-bold mt-0.5 sm:mt-1 truncate ${isMobile ? 'text-base sm:text-xl' : 'text-2xl'}`}>
                     {vendors.filter((v) => (v.status || '').toString().trim().toLowerCase() === 'active').length}
                   </p>
                 </div>
-                <div className="w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <Users className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6" />
+                <div className={`bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0 ${isMobile ? 'w-8 h-8 sm:w-10 sm:h-10' : 'w-12 h-12'}`}>
+                  <Users className={`${isMobile ? 'w-4 h-4 sm:w-5 sm:h-5' : 'w-6 h-6'}`} />
                 </div>
               </div>
             </CardContent>
@@ -1540,37 +1739,61 @@ export function AdminDashboard() {
 
         {/* Main Content */}
         <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle>Admin Management</CardTitle>
+          <CardHeader className="p-3 sm:p-4 md:p-6">
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0 flex-1">
+                <CardTitle className={`${isMobile ? 'text-lg sm:text-xl' : 'text-2xl'} ${isMobile ? 'leading-tight' : ''}`}>
+                  {isMobile ? (
+                    <>
+                      Admin<br />
+                      Management
+                    </>
+                  ) : (
+                    'Admin Management'
+                  )}
+                </CardTitle>
+                {!isMobile && <CardDescription className="text-sm sm:text-base truncate">Manage orders, vendors, and carriers</CardDescription>}
+              </div>
               <Button
-                onClick={fetchOrders}
+                onClick={() => fetchOrders(true)}
                 disabled={ordersLoading}
-                size="sm"
-                className="bg-gradient-to-br from-blue-500 to-blue-600 text-white border-0 shadow-lg hover:shadow-xl hover:from-blue-600 hover:to-blue-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                variant="outline"
+                className={`${isMobile ? 'h-8 sm:h-10 text-sm sm:text-base px-2 sm:px-4' : 'h-10'} bg-gradient-to-r from-blue-500 to-blue-600 text-white border-0 hover:from-blue-600 hover:to-blue-700 flex-shrink-0`}
+                size="default"
               >
-                <RefreshCw className={`w-4 h-4 mr-2 ${ordersLoading ? 'animate-spin' : ''}`} />
-                Refresh
+                {ordersLoading ? (
+                  <>
+                    <div className={`animate-spin rounded-full border-b-2 border-white ${isMobile ? 'h-3 w-3 mr-1 sm:h-4 sm:w-4 sm:mr-2' : 'h-4 w-4 mr-2'}`}></div>
+                    {isMobile ? 'Loading' : 'Refreshing...'}
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className={`${isMobile ? 'w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2' : 'w-4 h-4 mr-2'}`} />
+                    Refresh
+                  </>
+                )}
               </Button>
             </div>
           </CardHeader>
-          <CardContent>
+          <CardContent className="p-2 sm:p-4 md:p-6">
             <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
               {/* Fixed Controls Section */}
               <div className={`sticky ${isMobile ? 'top-16' : 'top-20'} bg-white z-40 pb-3 sm:pb-4 border-b mb-3 sm:mb-4`}>
-                <TabsList className={`grid w-full grid-cols-4 ${isMobile ? 'h-auto mb-3 sm:mb-4' : 'mb-6'}`}>
+                <TabsList className={`grid w-full ${isMobile ? 'grid-cols-3' : 'grid-cols-4'} ${isMobile ? 'h-auto mb-3 sm:mb-4' : 'mb-6'}`}>
                   <TabsTrigger value="orders" className={`${isMobile ? 'text-xs sm:text-sm px-1.5 sm:px-2 py-2.5 sm:py-3' : ''}`}>
-                    Orders ({ordersStats.totalOrders})
+                    Orders ({getFilteredOrdersQuantity("orders")})
                   </TabsTrigger>
                   <TabsTrigger value="vendors" className={`${isMobile ? 'text-xs sm:text-sm px-1.5 sm:px-2 py-2.5 sm:py-3' : ''}`}>
                     Vendors ({vendors.length})
                   </TabsTrigger>
                   <TabsTrigger value="carrier" className={`${isMobile ? 'text-xs sm:text-sm px-1.5 sm:px-2 py-2.5 sm:py-3' : ''}`}>
-                    Carrier ({carriers.length})
+                    Carrier ({getFilteredCarriers().length})
                   </TabsTrigger>
-                  <TabsTrigger value="inventory" className={`${isMobile ? 'text-xs sm:text-sm px-1.5 sm:px-2 py-2.5 sm:py-3' : ''}`}>
-                    Inventory
-                  </TabsTrigger>
+                  {!isMobile && (
+                    <TabsTrigger value="inventory" className={`${isMobile ? 'text-xs sm:text-sm px-1.5 sm:px-2 py-2.5 sm:py-3' : ''}`}>
+                      Inventory
+                    </TabsTrigger>
+                  )}
                   {/* Settlement Management Tab - Hidden for now */}
                   {/* <TabsTrigger value="settlement-management" className={`${isMobile ? 'text-xs sm:text-sm px-1.5 sm:px-2 py-2.5 sm:py-3' : ''}`}>
                     Settlement Management
@@ -1580,129 +1803,570 @@ export function AdminDashboard() {
                 {/* Filters - Only show for orders, vendors, and carriers tabs */}
                 {(activeTab === "orders" || activeTab === "vendors" || activeTab === "carrier") && (
                   <div className={`flex flex-col gap-3 mb-4 md:mb-6 ${!isMobile && 'sm:flex-row sm:items-center'}`}>
-                    {/* Search Input Row */}
-                    <div className="flex-1">
-                      <div className="relative">
-                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                        <Input
-                          placeholder={`Search ${activeTab}...`}
-                          value={searchTerm}
-                          onChange={(e) => setSearchTerm(e.target.value)}
-                          className={`pl-10 ${searchTerm && isMobile ? 'pr-20' : 'pr-10'}`}
-                          id="admin-search-input"
-                        />
-                        {searchTerm && isMobile && (
-                          <button
-                            onClick={() => {
-                              document.getElementById('admin-search-input')?.blur();
-                            }}
-                            className="absolute right-11 top-1/2 transform -translate-y-1/2 text-green-500 hover:text-green-700 transition-colors"
-                            type="button"
-                            title="Done"
-                          >
-                            <CheckCircle className="w-4 h-4" />
-                          </button>
-                        )}
-                        {searchTerm && (
-                          <button
-                            onClick={() => setSearchTerm('')}
-                            className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
-                            type="button"
-                            title="Clear"
-                          >
-                            <X className="w-4 h-4" />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                    
-                    {/* Filter and Date Row - Only for orders tab on mobile */}
-                    {activeTab === "orders" && isMobile && (
-                      <div className="flex gap-1.5 sm:gap-2 items-center">
-                        {/* Status Filter - Icon Only */}
-                        <Select value={statusFilter} onValueChange={setStatusFilter}>
-                          <SelectTrigger className="w-9 sm:w-12 h-9 sm:h-10 p-0 justify-center flex-shrink-0">
-                            <Filter className="w-3.5 sm:w-4 h-3.5 sm:h-4" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="all">All Status</SelectItem>
-                            {getUniqueStatuses().map((status) => (
-                              <SelectItem key={status} value={status}>
-                                {status.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                    {/* Mobile Carrier Tab - All filters in one row */}
+                    {activeTab === "carrier" && isMobile ? (
+                      <div className="flex gap-1.5 items-center">
+                        {/* Search Input */}
+                        <div className="flex-1 min-w-0">
+                          <div className="relative">
+                            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                            <Input
+                              placeholder="Search carrier..."
+                              value={searchTerm}
+                              onChange={(e) => setSearchTerm(e.target.value)}
+                              className="pl-10 pr-10"
+                              id="admin-search-input"
+                            />
+                            {searchTerm && (
+                              <button
+                                onClick={() => setSearchTerm('')}
+                                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                                type="button"
+                                title="Clear"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
 
-                        {/* Date Range */}
-                        <DatePicker
-                          date={dateFrom}
-                          onDateChange={(date) => {
-                            setDateFrom(date);
-                            if (date && dateTo && date > dateTo) {
-                              setDateTo(undefined);
-                              toast({
-                                title: "Date Range Adjusted",
-                                description: "To date was cleared as From date is after it",
-                              });
-                            }
-                          }}
-                          placeholder="From"
-                          className="flex-1 min-w-0 text-xs sm:text-sm"
-                        />
-                        <span className="text-gray-500 text-[10px] sm:text-sm flex-shrink-0">to</span>
-                        <DatePicker
-                          date={dateTo}
-                          onDateChange={(date) => {
-                            setDateTo(date);
-                            if (date && dateFrom && date < dateFrom) {
-                              setDateFrom(undefined);
-                              toast({
-                                title: "Date Range Adjusted",
-                                description: "From date was cleared as To date is before it",
-                              });
-                            }
-                          }}
-                          placeholder="To"
-                          className="flex-1 min-w-0 text-xs sm:text-sm"
-                        />
-                      </div>
-                    )}
+                        {/* Combined Filter - Status and Store filters in one popover */}
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button variant="outline" className="w-9 h-9 p-0 justify-center flex-shrink-0">
+                              <Filter className="w-4 h-4" />
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-80 p-4" align="start">
+                            <div className="space-y-4">
+                              <div className="flex items-center justify-between">
+                                <h4 className="font-semibold text-sm">Filters</h4>
+                                {(statusFilter !== "all" || selectedStoreFilter) && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 px-2 text-xs"
+                                    onClick={() => {
+                                      setStatusFilter("all");
+                                      if (stores.length > 0) {
+                                        setSelectedStoreFilter(stores[0].account_code);
+                                      }
+                                    }}
+                                  >
+                                    Clear All
+                                  </Button>
+                                )}
+                              </div>
 
-                    {/* Status Filter for Non-Orders tabs and Desktop */}
-                    {(activeTab !== "orders" || !isMobile) && (
-                      <Select value={statusFilter} onValueChange={setStatusFilter}>
-                        <SelectTrigger className="w-full sm:w-48">
-                          <Filter className="w-4 h-4 mr-2" />
-                          <SelectValue placeholder="Filter by status" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">All Status</SelectItem>
-                          {activeTab === "orders" && (
-                            <>
-                              {getUniqueStatuses().map((status) => (
-                                <SelectItem key={status} value={status}>
-                                  {status.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
+                              {/* Status Filter */}
+                              <div>
+                                <Label className="text-xs font-medium mb-2 block">Status</Label>
+                                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                                  <SelectTrigger className="w-full h-9">
+                                    <SelectValue placeholder="All Status" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="all">All Status</SelectItem>
+                                    <SelectItem value="active">Active</SelectItem>
+                                    <SelectItem value="pending">Pending</SelectItem>
+                                    <SelectItem value="inactive">Inactive</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+
+                              {/* Store Filter - Single Select */}
+                              <div>
+                                <Label className="text-xs font-medium mb-2 block">Store</Label>
+                                <Select 
+                                  value={selectedStoreFilter || ''} 
+                                  onValueChange={setSelectedStoreFilter}
+                                  disabled={stores.length === 0}
+                                >
+                                  <SelectTrigger className="w-full h-9">
+                                    <SelectValue placeholder="Select Store" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {stores.map((store) => (
+                                      <SelectItem key={store.account_code} value={store.account_code}>
+                                        {store.store_name}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+                          </PopoverContent>
+                        </Popover>
+                      </div>
+                    ) : (
+                      <>
+                        {/* Search Input Row - Desktop and other tabs */}
+                        <div className={`flex-1 ${activeTab === "orders" && isMobile ? 'flex items-center gap-1.5' : ''}`}>
+                          <div className="relative flex-1">
+                            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                            <Input
+                              placeholder={`Search ${activeTab}...`}
+                              value={searchTerm}
+                              onChange={(e) => setSearchTerm(e.target.value)}
+                              className={`pl-10 ${searchTerm && isMobile ? 'pr-20' : 'pr-10'}`}
+                              id="admin-search-input"
+                            />
+                            {searchTerm && isMobile && (
+                              <button
+                                onClick={() => {
+                                  document.getElementById('admin-search-input')?.blur();
+                                }}
+                                className="absolute right-11 top-1/2 transform -translate-y-1/2 text-green-500 hover:text-green-700 transition-colors"
+                                type="button"
+                                title="Done"
+                              >
+                                <CheckCircle className="w-4 h-4" />
+                              </button>
+                            )}
+                            {searchTerm && (
+                              <button
+                                onClick={() => setSearchTerm('')}
+                                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                                type="button"
+                                title="Clear"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
+                          
+                          {/* Combined Filter - Only for orders tab on mobile */}
+                          {activeTab === "orders" && isMobile && (
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <Button variant="outline" className="w-9 h-9 p-0 justify-center flex-shrink-0">
+                                <Filter className="w-4 h-4" />
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-80 p-4" align="start">
+                              <div className="space-y-4">
+                                <div className="flex items-center justify-between">
+                                  <h4 className="font-semibold text-sm">Filters</h4>
+                                  {(statusFilter !== "all" || selectedVendorFilters.length > 0 || selectedStoreFilters.length > 0 || dateFrom || dateTo) && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-6 px-2 text-xs"
+                                      onClick={() => {
+                                        setStatusFilter("all");
+                                        setSelectedVendorFilters([]);
+                                        setSelectedStoreFilters([]);
+                                        setDateFrom(undefined);
+                                        setDateTo(undefined);
+                                      }}
+                                    >
+                                      Clear All
+                                    </Button>
+                                  )}
+                                </div>
+
+                                {/* Status Filter */}
+                                <div>
+                                  <Label className="text-xs font-medium mb-2 block">Status</Label>
+                                  <Select value={statusFilter} onValueChange={setStatusFilter}>
+                                    <SelectTrigger className="w-full h-9">
+                                      <SelectValue placeholder="All Status" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="all">All Status</SelectItem>
+                                      {getUniqueStatuses().map((status) => (
+                                        <SelectItem key={status} value={status}>
+                                          {status.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+
+                                {/* Vendor Filter */}
+                                <div>
+                                  <Label className="text-xs font-medium mb-2 block">Vendors</Label>
+                                  <Popover>
+                                    <PopoverTrigger asChild>
+                                      <Button variant="outline" className="w-full h-9 justify-between text-left font-normal">
+                                        <span className="truncate">
+                                          {selectedVendorFilters.length === 0 
+                                            ? "All Vendors" 
+                                            : selectedVendorFilters.length === 1 
+                                            ? selectedVendorFilters[0]
+                                            : `${selectedVendorFilters.length} Vendors`}
+                                        </span>
+                                        <ChevronDown className="w-4 h-4 opacity-50" />
+                                      </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-56 p-0" align="start">
+                                      <div className="p-2">
+                                        <div className="flex items-center justify-between mb-2">
+                                          <Label className="text-xs font-medium">Select Vendors</Label>
+                                          {selectedVendorFilters.length > 0 && (
+                                            <Button
+                                              variant="ghost"
+                                              size="sm"
+                                              className="h-6 px-2 text-xs"
+                                              onClick={() => setSelectedVendorFilters([])}
+                                            >
+                                              Clear
+                                            </Button>
+                                          )}
+                                        </div>
+                                        <div className="max-h-48 overflow-y-auto space-y-1">
+                                          <label className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                                            <input
+                                              type="checkbox"
+                                              checked={selectedVendorFilters.length === 0}
+                                              onChange={(e) => {
+                                                if (e.target.checked) {
+                                                  setSelectedVendorFilters([])
+                                                }
+                                              }}
+                                              className="w-4 h-4"
+                                            />
+                                            <span className="text-xs">All Vendors</span>
+                                          </label>
+                                          <label className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                                            <input
+                                              type="checkbox"
+                                              checked={selectedVendorFilters.includes('Unclaimed')}
+                                              onChange={(e) => {
+                                                if (e.target.checked) {
+                                                  setSelectedVendorFilters([...selectedVendorFilters, 'Unclaimed'])
+                                                } else {
+                                                  const newFilters = selectedVendorFilters.filter(v => v !== 'Unclaimed')
+                                                  setSelectedVendorFilters(newFilters)
+                                                }
+                                              }}
+                                              className="w-4 h-4"
+                                            />
+                                            <span className="text-xs">Unclaimed</span>
+                                          </label>
+                                          {getUniqueVendorNames().map((vendorName) => (
+                                            <label key={vendorName} className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                                              <input
+                                                type="checkbox"
+                                                checked={selectedVendorFilters.includes(vendorName)}
+                                                onChange={(e) => {
+                                                  if (e.target.checked) {
+                                                    setSelectedVendorFilters([...selectedVendorFilters, vendorName])
+                                                  } else {
+                                                    const newFilters = selectedVendorFilters.filter(v => v !== vendorName)
+                                                    setSelectedVendorFilters(newFilters)
+                                                  }
+                                                }}
+                                                className="w-4 h-4"
+                                              />
+                                              <span className="text-xs">{vendorName}</span>
+                                            </label>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    </PopoverContent>
+                                  </Popover>
+                                </div>
+
+                                {/* Store Filter */}
+                                <div>
+                                  <Label className="text-xs font-medium mb-2 block">Stores</Label>
+                                  <Popover>
+                                    <PopoverTrigger asChild>
+                                      <Button variant="outline" className="w-full h-9 justify-between text-left font-normal">
+                                        <span className="truncate">
+                                          {selectedStoreFilters.length === 0 
+                                            ? "All Stores" 
+                                            : selectedStoreFilters.length === 1 
+                                            ? stores.find(s => s.account_code === selectedStoreFilters[0])?.store_name || selectedStoreFilters[0]
+                                            : `${selectedStoreFilters.length} Stores`}
+                                        </span>
+                                        <ChevronDown className="w-4 h-4 opacity-50" />
+                                      </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-56 p-0" align="start">
+                                      <div className="p-2">
+                                        <div className="flex items-center justify-between mb-2">
+                                          <Label className="text-xs font-medium">Select Stores</Label>
+                                          {selectedStoreFilters.length > 0 && (
+                                            <Button
+                                              variant="ghost"
+                                              size="sm"
+                                              className="h-6 px-2 text-xs"
+                                              onClick={() => setSelectedStoreFilters([])}
+                                            >
+                                              Clear
+                                            </Button>
+                                          )}
+                                        </div>
+                                        <div className="max-h-48 overflow-y-auto space-y-1">
+                                          <label className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                                            <input
+                                              type="checkbox"
+                                              checked={selectedStoreFilters.length === 0}
+                                              onChange={(e) => {
+                                                if (e.target.checked) {
+                                                  setSelectedStoreFilters([])
+                                                }
+                                              }}
+                                              className="w-4 h-4"
+                                            />
+                                            <span className="text-xs">All Stores</span>
+                                          </label>
+                                          {stores.map((store) => (
+                                            <label key={store.account_code} className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                                              <input
+                                                type="checkbox"
+                                                checked={selectedStoreFilters.includes(store.account_code)}
+                                                onChange={(e) => {
+                                                  if (e.target.checked) {
+                                                    setSelectedStoreFilters([...selectedStoreFilters, store.account_code])
+                                                  } else {
+                                                    const newFilters = selectedStoreFilters.filter(s => s !== store.account_code)
+                                                    setSelectedStoreFilters(newFilters)
+                                                  }
+                                                }}
+                                                className="w-4 h-4"
+                                              />
+                                              <span className="text-xs">{store.store_name}</span>
+                                            </label>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    </PopoverContent>
+                                  </Popover>
+                                </div>
+
+                                {/* Date Range */}
+                                <div>
+                                  <Label className="text-xs font-medium mb-2 block">Date Range</Label>
+                                  <div className="flex gap-2 items-center">
+                                    <DatePicker
+                                      date={dateFrom}
+                                      onDateChange={(date) => {
+                                        setDateFrom(date);
+                                        if (date && dateTo && date > dateTo) {
+                                          setDateTo(undefined);
+                                          toast({
+                                            title: "Date Range Adjusted",
+                                            description: "To date was cleared as From date is after it",
+                                          });
+                                        }
+                                      }}
+                                      placeholder="From"
+                                      className="flex-1 min-w-0 text-xs h-9"
+                                    />
+                                    <span className="text-gray-500 text-xs flex-shrink-0">to</span>
+                                    <DatePicker
+                                      date={dateTo}
+                                      onDateChange={(date) => {
+                                        setDateTo(date);
+                                        if (date && dateFrom && date < dateFrom) {
+                                          setDateFrom(undefined);
+                                          toast({
+                                            title: "Date Range Adjusted",
+                                            description: "From date was cleared as To date is before it",
+                                          });
+                                        }
+                                      }}
+                                      placeholder="To"
+                                      className="flex-1 min-w-0 text-xs h-9"
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            </PopoverContent>
+                          </Popover>
+                          )}
+                        </div>
+
+                        {/* Status Filter for Non-Orders tabs and Desktop */}
+                        {(activeTab !== "orders" || !isMobile) && (
+                          <Select value={statusFilter} onValueChange={setStatusFilter}>
+                            <SelectTrigger className="w-full sm:w-40">
+                              <Filter className="w-4 h-4 mr-2" />
+                              <SelectValue placeholder="Filter by status" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All Status</SelectItem>
+                              {activeTab === "orders" && (
+                                <>
+                                  {getUniqueStatuses().map((status) => (
+                                    <SelectItem key={status} value={status}>
+                                      {status.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
+                                    </SelectItem>
+                                  ))}
+                                </>
+                              )}
+                              {activeTab === "vendors" && (
+                                <>
+                                  <SelectItem value="active">Active</SelectItem>
+                                  <SelectItem value="pending">Pending</SelectItem>
+                                  <SelectItem value="inactive">Inactive</SelectItem>
+                                </>
+                              )}
+                              {activeTab === "carrier" && (
+                                <>
+                                  <SelectItem value="active">Active</SelectItem>
+                                  <SelectItem value="pending">Pending</SelectItem>
+                                  <SelectItem value="inactive">Inactive</SelectItem>
+                                </>
+                              )}
+                            </SelectContent>
+                          </Select>
+                        )}
+
+                        {/* Add New Vendor Button - Only for Vendors tab */}
+                        {activeTab === "vendors" && !isMobile && (
+                          <Button onClick={() => setShowVendorModal(true)}>
+                            <UserPlus className="w-4 h-4 mr-2" />
+                            Add New Vendor
+                          </Button>
+                        )}
+
+                        {/* Vendor Filter - Only for Orders tab (Desktop) */}
+                        {activeTab === "orders" && !isMobile && (
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <Button variant="outline" className="w-full sm:w-40 justify-start text-left font-normal">
+                                <Users className="w-4 h-4 mr-2" />
+                                <span className="truncate">
+                                  {selectedVendorFilters.length === 0 
+                                    ? "All Vendors" 
+                                    : selectedVendorFilters.length === 1 
+                                    ? selectedVendorFilters[0]
+                                    : `${selectedVendorFilters.length} Vendors`}
+                                </span>
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-56 p-0" align="start">
+                              <div className="p-2">
+                                <div className="flex items-center justify-between mb-2">
+                                  <Label className="text-sm font-medium">Select Vendors</Label>
+                                  {selectedVendorFilters.length > 0 && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-6 px-2 text-xs"
+                                      onClick={() => setSelectedVendorFilters([])}
+                                    >
+                                      Clear
+                                    </Button>
+                                  )}
+                                </div>
+                                <div className="max-h-60 overflow-y-auto space-y-1">
+                                  <label className="flex items-center space-x-2 p-2 hover:bg-gray-50 rounded cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedVendorFilters.includes('Unclaimed')}
+                                      onChange={(e) => {
+                                        if (e.target.checked) {
+                                          setSelectedVendorFilters([...selectedVendorFilters, 'Unclaimed'])
+                                        } else {
+                                          setSelectedVendorFilters(selectedVendorFilters.filter(v => v !== 'Unclaimed'))
+                                        }
+                                      }}
+                                      className="w-4 h-4"
+                                    />
+                                    <span className="text-sm">Unclaimed</span>
+                                  </label>
+                                  {getUniqueVendorNames().map((vendorName) => (
+                                    <label key={vendorName} className="flex items-center space-x-2 p-2 hover:bg-gray-50 rounded cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        checked={selectedVendorFilters.includes(vendorName)}
+                                        onChange={(e) => {
+                                          if (e.target.checked) {
+                                            setSelectedVendorFilters([...selectedVendorFilters, vendorName])
+                                          } else {
+                                            setSelectedVendorFilters(selectedVendorFilters.filter(v => v !== vendorName))
+                                          }
+                                        }}
+                                        className="w-4 h-4"
+                                      />
+                                      <span className="text-sm">{vendorName}</span>
+                                    </label>
+                                  ))}
+                                </div>
+                              </div>
+                            </PopoverContent>
+                          </Popover>
+                        )}
+
+                        {/* Store Filter - Only for Orders tab (Desktop) */}
+                        {activeTab === "orders" && !isMobile && (
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <Button variant="outline" className="w-full sm:w-40 justify-start text-left font-normal">
+                                <Store className="w-4 h-4 mr-2" />
+                                <span className="truncate">
+                                  {selectedStoreFilters.length === 0 
+                                    ? "All Stores" 
+                                    : selectedStoreFilters.length === 1 
+                                    ? stores.find(s => s.account_code === selectedStoreFilters[0])?.store_name || selectedStoreFilters[0]
+                                    : `${selectedStoreFilters.length} Stores`}
+                                </span>
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-56 p-0" align="start">
+                              <div className="p-2">
+                                <div className="flex items-center justify-between mb-2">
+                                  <Label className="text-sm font-medium">Select Stores</Label>
+                                  {selectedStoreFilters.length > 0 && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-6 px-2 text-xs"
+                                      onClick={() => setSelectedStoreFilters([])}
+                                    >
+                                      Clear
+                                    </Button>
+                                  )}
+                                </div>
+                                <div className="max-h-60 overflow-y-auto space-y-1">
+                                  {stores.map((store) => (
+                                    <label key={store.account_code} className="flex items-center space-x-2 p-2 hover:bg-gray-50 rounded cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        checked={selectedStoreFilters.includes(store.account_code)}
+                                        onChange={(e) => {
+                                          if (e.target.checked) {
+                                            setSelectedStoreFilters([...selectedStoreFilters, store.account_code])
+                                          } else {
+                                            setSelectedStoreFilters(selectedStoreFilters.filter(s => s !== store.account_code))
+                                          }
+                                        }}
+                                        className="w-4 h-4"
+                                      />
+                                      <span className="text-sm">{store.store_name}</span>
+                                    </label>
+                                  ))}
+                                </div>
+                              </div>
+                            </PopoverContent>
+                          </Popover>
+                        )}
+
+                        {/* Store Filter - Only for Carrier tab (Desktop) */}
+                        {activeTab === "carrier" && !isMobile && (
+                          <Select 
+                            value={selectedStoreFilter} 
+                            onValueChange={setSelectedStoreFilter}
+                            disabled={stores.length === 0}
+                          >
+                            <SelectTrigger className="w-full sm:w-40">
+                              <SelectValue placeholder={stores.length === 0 ? "Loading..." : "Select Store"} />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {stores.map((store) => (
+                                <SelectItem key={store.account_code} value={store.account_code}>
+                                  {store.store_name}
                                 </SelectItem>
                               ))}
-                            </>
-                          )}
-                          {activeTab === "vendors" && (
-                            <>
-                              <SelectItem value="active">Active</SelectItem>
-                              <SelectItem value="pending">Pending</SelectItem>
-                              <SelectItem value="inactive">Inactive</SelectItem>
-                            </>
-                          )}
-                          {activeTab === "carrier" && (
-                            <>
-                              <SelectItem value="active">Active</SelectItem>
-                              <SelectItem value="pending">Pending</SelectItem>
-                              <SelectItem value="inactive">Inactive</SelectItem>
-                            </>
-                          )}
-                        </SelectContent>
-                      </Select>
+                            </SelectContent>
+                          </Select>
+                        )}
+                      </>
                     )}
 
                     {activeTab === "orders" && !isMobile && (
@@ -1747,22 +2411,6 @@ export function AdminDashboard() {
                 )}
 
                 {/* Tab-specific Actions */}
-
-                {activeTab === "vendors" && !isMobile && (
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Vendor Actions</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="flex flex-wrap gap-2">
-                        <Button onClick={() => setShowVendorModal(true)}>
-                          <UserPlus className="w-4 h-4 mr-2" />
-                          Add New Vendor
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                )}
 
                 {/* Add Vendor Dialog - Accessible from both desktop and mobile */}
                 <Dialog open={showVendorModal} onOpenChange={setShowVendorModal}>
@@ -1886,10 +2534,10 @@ export function AdminDashboard() {
                 <TabsContent value="orders" className="mt-0">
                   <div className={`rounded-md border ${!isMobile ? 'overflow-y-auto max-h-[600px]' : ''}`}>
                     {!isMobile ? (
-                      <Table>
+                      <Table className="text-xs">
                       <TableHeader className="sticky top-0 bg-white z-30 shadow-sm border-b">
-                        <TableRow>
-                          <TableHead className="w-12">
+                        <TableRow className="[&>th]:py-2">
+                          <TableHead className="w-12 text-xs">
                             <input
                               type="checkbox"
                               onChange={(e) => {
@@ -1906,21 +2554,22 @@ export function AdminDashboard() {
                               }
                             />
                           </TableHead>
-                          <TableHead>Image</TableHead>
-                          <TableHead>Order ID</TableHead>
-                          <TableHead>Customer</TableHead>
-                          <TableHead>Vendor</TableHead>
-                          <TableHead>Product</TableHead>
-                          <TableHead>Value</TableHead>
-                          <TableHead>Status</TableHead>
-                          <TableHead>Created</TableHead>
-                          <TableHead>Actions</TableHead>
+                          <TableHead className="text-xs">Image</TableHead>
+                          <TableHead className="text-xs">Order ID</TableHead>
+                          <TableHead className="text-xs">Customer</TableHead>
+                          <TableHead className="text-xs">Store</TableHead>
+                          <TableHead className="text-xs">Vendor</TableHead>
+                          <TableHead className="text-xs">Product</TableHead>
+                          <TableHead className="text-xs">Value</TableHead>
+                          <TableHead className="text-xs">Status</TableHead>
+                          <TableHead className="text-xs">Created</TableHead>
+                          <TableHead className="text-xs">Actions</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                                                  {ordersLoading ? (
                            <TableRow>
-                             <TableCell colSpan={9} className="text-center py-8">
+                             <TableCell colSpan={10} className="text-center py-8">
                                Loading orders...
                              </TableCell>
                            </TableRow>
@@ -1928,7 +2577,7 @@ export function AdminDashboard() {
                           getFilteredOrdersForTab("orders").map((order) => (
                             <TableRow 
                               key={order.unique_id}
-                              className="cursor-pointer hover:bg-gray-50"
+                              className="cursor-pointer hover:bg-gray-50 [&>td]:py-2"
                               onClick={() => {
                                 if (selectedOrders.includes(order.unique_id)) {
                                   setSelectedOrders(selectedOrders.filter((id) => id !== order.unique_id))
@@ -1950,11 +2599,11 @@ export function AdminDashboard() {
                                 }}
                               />
                             </TableCell>
-                            <TableCell onClick={(e) => e.stopPropagation()}>
+                            <TableCell onClick={(e) => e.stopPropagation()} className="py-2">
                               <img
                                 src={order.image || "/placeholder.svg"}
                                   alt={order.product_name}
-                                  className="w-12 h-12 rounded-lg object-cover cursor-pointer"
+                                  className="w-10 h-10 rounded object-cover cursor-pointer"
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     setSelectedImageUrl(order.image || null);
@@ -1967,25 +2616,31 @@ export function AdminDashboard() {
                                   }}
                               />
                             </TableCell>
-                                                             <TableCell className="font-medium">{order.order_id}</TableCell>
-                               <TableCell>{order.customer_name}</TableCell>
-                               <TableCell>{order.vendor_name}</TableCell>
-                               <TableCell>{order.product_name}</TableCell>
-                               <TableCell>₹{order.value}</TableCell>
-                            <TableCell>{getStatusBadge(order.status)}</TableCell>
-                               <TableCell>
-                                 {order.created_at ? (
-                                   <div className="flex flex-col">
-                                     <span className="text-sm font-medium">
-                                       {new Date(order.created_at).toLocaleDateString()}
-                                     </span>
-                                     <span className="text-xs text-gray-500">
-                                       {new Date(order.created_at).toLocaleTimeString()}
-                                     </span>
-                                   </div>
-                                 ) : "N/A"}
-                               </TableCell>
-                            <TableCell onClick={(e) => e.stopPropagation()}>
+                            <TableCell className="font-medium text-xs">{order.order_id}</TableCell>
+                            <TableCell className="text-xs">{order.customer_name}</TableCell>
+                            <TableCell className="text-xs">
+                              <div className="flex flex-col">
+                                <span className="font-medium">{order.store_name || 'N/A'}</span>
+                                <span className="text-[10px] text-gray-500">{order.account_code || ''}</span>
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-xs">{order.vendor_name}</TableCell>
+                            <TableCell className="text-xs">{order.product_name}</TableCell>
+                            <TableCell className="text-xs whitespace-nowrap">₹{order.value}</TableCell>
+                            <TableCell className="text-xs">{getStatusBadge(order.status)}</TableCell>
+                            <TableCell className="text-xs">
+                              {order.created_at ? (
+                                <div className="flex flex-col">
+                                  <span className="font-medium">
+                                    {new Date(order.created_at).toLocaleDateString()}
+                                  </span>
+                                  <span className="text-[10px] text-gray-500">
+                                    {new Date(order.created_at).toLocaleTimeString()}
+                                  </span>
+                                </div>
+                              ) : "N/A"}
+                            </TableCell>
+                            <TableCell onClick={(e) => e.stopPropagation()} className="py-2">
                               <div className="flex gap-1">
                                   {order.status === 'unclaimed' ? (
                                     <Button 
@@ -1996,10 +2651,11 @@ export function AdminDashboard() {
                                         openAssignModal(order);
                                       }}
                                       disabled={assignLoading[order.unique_id]}
+                                      className="text-xs h-7 px-2"
                                     >
                                       {assignLoading[order.unique_id] ? (
                                         <>
-                                          <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-1"></div>
+                                          <div className="animate-spin rounded-full h-2.5 w-2.5 border-b-2 border-white mr-1"></div>
                                           Assigning...
                                         </>
                                       ) : (
@@ -2015,11 +2671,11 @@ export function AdminDashboard() {
                                         handleUnassignOrder(order);
                                       }}
                                       disabled={unassignLoading[order.unique_id]}
-                                      className="border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700"
+                                      className="border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700 text-xs h-7 px-2"
                                     >
                                       {unassignLoading[order.unique_id] ? (
                                         <>
-                                          <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-red-600 mr-1"></div>
+                                          <div className="animate-spin rounded-full h-2.5 w-2.5 border-b-2 border-red-600 mr-1"></div>
                                           Unassigning...
                                         </>
                                       ) : (
@@ -2033,7 +2689,7 @@ export function AdminDashboard() {
                           ))
                                                  ) : (
                            <TableRow>
-                             <TableCell colSpan={9} className="text-center py-8 text-gray-500">
+                             <TableCell colSpan={10} className="text-center py-8 text-gray-500">
                                No orders found
                              </TableCell>
                            </TableRow>
@@ -2041,14 +2697,14 @@ export function AdminDashboard() {
                       </TableBody>
                       </Table>
                     ) : (
-                      <div className="space-y-3 p-2 pb-24">
+                      <div className="space-y-2.5 sm:space-y-3 pb-24">
                         {ordersLoading ? (
                           <Card className="p-4 text-center">Loading orders...</Card>
                         ) : (
                           getFilteredOrdersForTab("orders").map((order: any) => (
                             <Card 
                               key={order.unique_id} 
-                              className="p-2 sm:p-3 cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors border-l-4"
+                              className="p-2.5 sm:p-3 cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors border-l-4"
                               style={{ 
                                 borderLeftColor: 
                                   order.status === 'unclaimed' ? '#f59e0b' : 
@@ -2082,8 +2738,9 @@ export function AdminDashboard() {
                                 }
                               }}
                             >
-                              {/* Top Row: Checkbox and Status */}
-                              <div className="flex items-start justify-between mb-1.5 sm:mb-2">
+                              <div className="space-y-2 sm:space-y-3">
+                              {/* Top Row: Checkbox, Vendor, and Status */}
+                              <div className="flex items-start justify-between">
                                 <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                                   <input
                                     type="checkbox"
@@ -2095,18 +2752,23 @@ export function AdminDashboard() {
                                         setSelectedOrders(selectedOrders.filter((id) => id !== order.unique_id))
                                       }
                                     }}
-                                    className="w-4 h-4"
+                                    className="mt-1 w-3.5 h-3.5 sm:w-4 sm:h-4"
                                   />
                                 </div>
-                                {getStatusBadge(order.status)}
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className={`text-xs sm:text-sm font-medium truncate ${String(order.vendor_name || '').toLowerCase().includes('unclaimed') ? 'text-red-600' : 'text-blue-600'}`}>
+                                    {order.vendor_name || 'Unclaimed'}
+                                  </span>
+                                  {getStatusBadge(order.status)}
+                                </div>
                               </div>
 
                               {/* Order ID and Image Row */}
-                              <div className="flex items-start gap-2 sm:gap-3 mb-2">
+                              <div className="flex items-start gap-2 sm:gap-3">
                                 <img
                                   src={order.image || "/placeholder.svg"}
                                   alt={order.product_name}
-                                  className="w-12 sm:w-16 h-12 sm:h-16 rounded-lg object-cover cursor-pointer flex-shrink-0 border border-gray-200"
+                                  className="w-12 h-12 sm:w-16 sm:h-16 rounded-lg object-cover cursor-pointer flex-shrink-0"
                                   onClick={(e) => { 
                                     e.stopPropagation();
                                     setSelectedImageUrl(order.image || null); 
@@ -2116,94 +2778,50 @@ export function AdminDashboard() {
                                   onError={(e) => { const t = e.target as HTMLImageElement; t.src = "/placeholder.svg"; }}
                                 />
                                 <div className="flex-1 min-w-0">
-                                  <p className="font-bold text-sm sm:text-base text-gray-900 mb-1 truncate">{order.order_id}</p>
-                                  <p className="text-xs sm:text-sm font-medium text-gray-800 line-clamp-2 leading-relaxed">
+                                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                                    <h4 className="font-medium text-sm sm:text-base text-gray-900 truncate">{order.order_id}</h4>
+                                    {order.store_name && (
+                                      <Badge variant="outline" className="text-xs px-1.5 py-0.5 h-auto bg-blue-50 text-blue-700 border-blue-200">
+                                        {order.store_name}
+                                      </Badge>
+                                    )}
+                                    {order.value && (
+                                      <Badge variant="outline" className="text-xs px-1.5 py-0.5 h-auto bg-green-50 text-green-700 border-green-200">
+                                        ₹{order.value}
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  <p className="text-xs sm:text-sm text-gray-600 break-words leading-relaxed">
                                     {order.product_name}
+                                  </p>
+                                  <p className="text-xs sm:text-sm text-gray-500 break-words leading-relaxed">
+                                    Code: {order.product_code || 'N/A'}
                                   </p>
                                 </div>
                               </div>
 
-                              {/* Details Grid */}
-                              <div className="grid grid-cols-2 gap-x-2 sm:gap-x-4 gap-y-1 sm:gap-y-1.5 text-xs sm:text-sm border-t pt-2">
-                                <div className="break-all">
-                                  <span className="text-gray-500">SKU:</span>
-                                  <span className="ml-1 font-medium text-gray-900 break-all">{order.product_code || 'N/A'}</span>
-                                </div>
+                              {/* Details Row - Date, Qty, Customer side by side */}
+                              <div className="grid grid-cols-3 gap-1.5 sm:gap-2 text-xs sm:text-sm">
                                 <div>
-                                  <span className="text-gray-500">Qty:</span>
-                                  <span className="ml-1 font-medium text-gray-900">{order.quantity || '1'}</span>
-                                </div>
-                                <div className="col-span-2 truncate">
-                                  <span className="text-gray-500">Customer:</span>
-                                  <span className="ml-1 font-medium text-gray-900 truncate">{order.customer_name || 'N/A'}</span>
-                                </div>
-                                <div className="col-span-2 truncate">
-                                  <span className="text-gray-500">Vendor:</span>
-                                  <span className={`ml-1 font-medium truncate ${String(order.vendor_name || '').toLowerCase().includes('unclaimed') ? 'text-red-600' : 'text-blue-600'}`}>
-                                    {order.vendor_name || 'Unclaimed'}
-                                  </span>
-                                </div>
-                                <div className="col-span-2 truncate">
-                                  <span className="text-gray-500">Created:</span>
-                                  <span className="ml-1 font-medium text-gray-900 truncate">
+                                  <span className="text-gray-500">Date:</span>
+                                  <p className="font-medium truncate">
                                     {order.created_at ? 
                                       (() => {
                                         const date = new Date(order.created_at);
-                                        const year = date.getFullYear();
-                                        const month = String(date.getMonth() + 1).padStart(2, '0');
-                                        const day = String(date.getDate()).padStart(2, '0');
-                                        const hours = String(date.getHours()).padStart(2, '0');
-                                        const minutes = String(date.getMinutes()).padStart(2, '0');
-                                        return `${year}-${month}-${day} ${hours}:${minutes}`;
+                                        return date.toLocaleDateString();
                                       })()
                                     : 'N/A'}
-                                  </span>
+                                  </p>
+                                </div>
+                                <div>
+                                  <span className="text-gray-500">Qty:</span>
+                                  <p className="font-medium truncate">{order.quantity || '-'}</p>
+                                </div>
+                                <div>
+                                  <span className="text-gray-500">Customer:</span>
+                                  <p className="font-medium truncate">{order.customer_name || 'N/A'}</p>
                                 </div>
                               </div>
-                              
-                              {/* Assign/Unassign Button Row - Full Width at Bottom */}
-                              <div className="mt-3 pt-2 border-t">
-                                {order.status === 'unclaimed' ? (
-                                  <Button 
-                                    size="sm" 
-                                    variant="default"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      openAssignModal(order);
-                                    }}
-                                    disabled={assignLoading[order.unique_id]}
-                                    className="w-full text-xs h-8"
-                                  >
-                                    {assignLoading[order.unique_id] ? (
-                                      <>
-                                        <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-1"></div>
-                                        Assigning...
-                                      </>
-                                    ) : (
-                                      'Assign Order'
-                                    )}
-                                  </Button>
-                                ) : (
-                                  <Button 
-                                    size="sm" 
-                                    variant="outline"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleUnassignOrder(order);
-                                    }}
-                                    disabled={unassignLoading[order.unique_id]}
-                                    className="w-full text-xs h-8 border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700"
-                                  >
-                                    {unassignLoading[order.unique_id] ? (
-                                      <>
-                                        <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-red-600 mr-1"></div>
-                                        Unassigning...
-                                      </>
-                                    ) : (
-                                      'Unassign Order'
-                                    )}
-                                  </Button>
-                                )}
                               </div>
                             </Card>
                           ))
@@ -2540,6 +3158,7 @@ export function AdminDashboard() {
                               <TableRow>
                                 <TableHead>Carrier ID</TableHead>
                                 <TableHead>Carrier Name</TableHead>
+                                <TableHead>Store</TableHead>
                                 <TableHead>Status</TableHead>
                                 <TableHead>Priority</TableHead>
                                 <TableHead>Weight</TableHead>
@@ -2551,7 +3170,19 @@ export function AdminDashboard() {
                                 <TableRow key={carrier.carrier_id}>
                                   <TableCell className="font-medium">{carrier.carrier_id}</TableCell>
                                   <TableCell>{carrier.carrier_name}</TableCell>
-                                  <TableCell>{getStatusBadge(carrier.status)}</TableCell>
+                                  <TableCell>
+                                    {carrier.store_name ? (
+                                      <div className="flex flex-col gap-1">
+                                        <span className="text-xs text-gray-900">{carrier.store_name}</span>
+                                        <span className="text-xs text-gray-500">{carrier.account_code}</span>
+                                      </div>
+                                    ) : (
+                                      <span className="text-xs text-gray-400">—</span>
+                                    )}
+                                  </TableCell>
+                                  <TableCell>
+                                    {getStatusBadge(carrier.status)}
+                                  </TableCell>
                                   <TableCell>{getPriorityNumberBadge(carrier.priority)}</TableCell>
                                   <TableCell>{carrier.weight_in_kg ? `${carrier.weight_in_kg}kg` : 'N/A'}</TableCell>
                                   <TableCell>
@@ -2584,11 +3215,14 @@ export function AdminDashboard() {
                                          ID: {carrier.carrier_id}
                                        </span>
                                      </div>
-                                     <div className="flex items-center gap-2">
+                                     <div className="flex items-center gap-2 flex-wrap">
+                                       {carrier.store_name && (
+                                         <Badge variant="outline" className="text-xs bg-purple-50 text-purple-700 border-purple-200">
+                                           {carrier.store_name}
+                                         </Badge>
+                                       )}
                                        {getStatusBadge(carrier.status)}
-                                       <span className="text-sm font-medium text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
-                                         Priority: {carrier.priority || '—'}
-                                       </span>
+                                       {getPriorityNumberBadge(carrier.priority)}
                                      </div>
                                    </div>
                                  </div>
@@ -2606,42 +3240,36 @@ export function AdminDashboard() {
                                  </div>
 
                                  {/* Actions Section */}
-                                 <div className="space-y-2">
+                                 <div className="flex gap-2 items-center">
                                    {/* Priority Control */}
-                                   <div className="flex items-center justify-between">
-                                     <span className="text-sm font-medium text-gray-700">Priority Control:</span>
-                                     <div className="flex gap-1">
-                                       <Button 
-                                         size="sm" 
-                                         variant="outline" 
-                                         disabled={movingCarrier === carrier.carrier_id} 
-                                         onClick={() => handleMoveCarrier(carrier.carrier_id, 'up')} 
-                                         className="h-8 w-8 p-0"
-                                         title="Move Up"
-                                       >
-                                         {movingCarrier === carrier.carrier_id ? 
-                                           <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-gray-600"></div> : 
-                                           <span className="text-sm">▲</span>
-                                         }
-                                       </Button>
-                                       <Button 
-                                         size="sm" 
-                                         variant="outline" 
-                                         disabled={movingCarrier === carrier.carrier_id} 
-                                         onClick={() => handleMoveCarrier(carrier.carrier_id, 'down')} 
-                                         className="h-8 w-8 p-0"
-                                         title="Move Down"
-                                       >
-                                         {movingCarrier === carrier.carrier_id ? 
-                                           <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-gray-600"></div> : 
-                                           <span className="text-sm">▼</span>
-                                         }
-                                       </Button>
-                                     </div>
-                                   </div>
+                                   <Button 
+                                     size="sm" 
+                                     variant="outline" 
+                                     disabled={movingCarrier === carrier.carrier_id} 
+                                     onClick={() => handleMoveCarrier(carrier.carrier_id, 'up')} 
+                                     className="h-9 w-9 p-0"
+                                     title="Move Up"
+                                   >
+                                     {movingCarrier === carrier.carrier_id ? 
+                                       <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-gray-600"></div> : 
+                                       <span className="text-sm">▲</span>
+                                     }
+                                   </Button>
+                                   <Button 
+                                     size="sm" 
+                                     variant="outline" 
+                                     disabled={movingCarrier === carrier.carrier_id} 
+                                     onClick={() => handleMoveCarrier(carrier.carrier_id, 'down')} 
+                                     className="h-9 w-9 p-0"
+                                     title="Move Down"
+                                   >
+                                     {movingCarrier === carrier.carrier_id ? 
+                                       <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-gray-600"></div> : 
+                                       <span className="text-sm">▼</span>
+                                     }
+                                   </Button>
 
                                    {/* Management Actions */}
-                                   <div className="flex gap-2">
                                      <Button 
                                        size="sm" 
                                        variant="outline" 
@@ -2690,7 +3318,6 @@ export function AdminDashboard() {
                                        <Trash2 className="w-4 h-4 mr-2" />
                                        Delete
                                      </Button>
-                                   </div>
                                  </div>
                                </Card>
                              ))}
