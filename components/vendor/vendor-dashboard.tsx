@@ -1803,6 +1803,54 @@ export function VendorDashboard() {
     }
   }
 
+  // Helper function to detect iOS devices
+  const isIOSDevice = (): boolean => {
+    const userAgent = navigator.userAgent || navigator.vendor || (window as any).opera;
+    // Check for iPhone, iPad, or iPod
+    const isIOS = /iPhone|iPad|iPod/i.test(userAgent);
+    // Also check for iPad on iOS 13+ (which reports as Mac)
+    const isIPadOS13 = /Macintosh/i.test(userAgent) && 
+                       navigator.maxTouchPoints && 
+                       navigator.maxTouchPoints > 1;
+    return isIOS || isIPadOS13;
+  };
+
+  // Helper function to download file with iOS compatibility
+  const downloadFile = async (url: string, filename: string): Promise<void> => {
+    const isIOS = isIOSDevice();
+    
+    if (isIOS) {
+      // iOS: Use iframe approach (doesn't block JavaScript execution)
+      console.log('🍎 iOS detected: Using iframe download method');
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      iframe.style.position = 'absolute';
+      iframe.style.left = '-9999px';
+      iframe.src = url;
+      document.body.appendChild(iframe);
+      
+      // Clean up after delay
+      setTimeout(() => {
+        if (document.body.contains(iframe)) {
+          document.body.removeChild(iframe);
+        }
+        window.URL.revokeObjectURL(url);
+      }, 2000);
+    } else {
+      // Non-iOS: Use link.click() approach
+      console.log('📱 Non-iOS device: Using link.click() download method');
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    }
+  };
+
   const handleDownloadLabel = async (orderId: string, format: string) => {
     // Set loading state for this specific order
     setLabelDownloadLoading(prev => ({ ...prev, [orderId]: true }));
@@ -1849,10 +1897,8 @@ export function VendorDashboard() {
             }
             const blob = new Blob([bytes], { type: 'application/pdf' });
             
-            // Create download link
+            // Create download URL
             const url = window.URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = url;
             
             // Generate filename with format: {vendor_id}_{vendor_city}_{current_date}_{format}
             const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, ''); // yyyymmdd format
@@ -1860,11 +1906,8 @@ export function VendorDashboard() {
             const vendorCity = vendorAddress?.city || 'unknown';
             const filename = `${vendorId}_${vendorCity}_${currentDate}_${responseFormat}.pdf`;
             
-            link.download = filename;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            window.URL.revokeObjectURL(url);
+            // Download using iOS-compatible method
+            await downloadFile(url, filename);
             
             console.log('✅ FRONTEND: Formatted PDF downloaded successfully');
             
@@ -1875,7 +1918,7 @@ export function VendorDashboard() {
               description: `${responseFormat} label for order ${orderDisplayId} downloaded successfully`,
             });
             
-            // Refresh orders to update the UI
+            // Refresh orders to update the UI (works immediately on iOS with iframe approach)
             await refreshOrders();
             
           } catch (pdfError) {
@@ -1894,10 +1937,8 @@ export function VendorDashboard() {
           try {
             const blob = await apiClient.downloadLabelFile(shipping_url);
             
-            // Create download link
+            // Create download URL
             const url = window.URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = url;
             
             // Generate filename with format: {vendor_id}_{vendor_city}_{current_date}
             const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, ''); // yyyymmdd format
@@ -1905,11 +1946,8 @@ export function VendorDashboard() {
             const vendorCity = vendorAddress?.city || 'unknown';
             const filename = `${vendorId}_${vendorCity}_${currentDate}.pdf`;
             
-            link.download = filename;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            window.URL.revokeObjectURL(url);
+            // Download using iOS-compatible method
+            await downloadFile(url, filename);
             
             console.log('✅ FRONTEND: Label file downloaded successfully');
             
@@ -1920,7 +1958,7 @@ export function VendorDashboard() {
               description: `${format} label for order ${orderDisplayId} downloaded successfully`,
             });
             
-            // Refresh orders to update the UI
+            // Refresh orders to update the UI (works immediately on iOS with iframe approach)
             await refreshOrders();
             
           } catch (downloadError) {
@@ -2008,10 +2046,8 @@ export function VendorDashboard() {
       console.log('  - blob size:', blob.size);
       console.log('  - blob type:', blob.type);
       
-      // Create download link for the combined PDF
+      // Create download URL for the combined PDF
       const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
       
       // Generate filename with format: {vendor_id}_{vendor_city}_{current_date}_{format}
       const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, ''); // yyyymmdd format
@@ -2019,11 +2055,8 @@ export function VendorDashboard() {
       const vendorCity = vendorAddress?.city || 'unknown';
       const filename = `${vendorId}_${vendorCity}_${currentDate}_${labelFormat}.pdf`;
       
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
+      // Download using iOS-compatible method
+      await downloadFile(url, filename);
       
       console.log('✅ FRONTEND: Bulk labels PDF downloaded successfully');
       
@@ -2048,7 +2081,7 @@ export function VendorDashboard() {
         });
       }
 
-      // Refresh orders to update the UI
+      // Refresh orders to update the UI (works immediately on iOS with iframe approach)
       await refreshOrders();
 
       // Clear selected orders
@@ -2349,6 +2382,13 @@ export function VendorDashboard() {
     return selectedReadyOrders.reduce((sum, order) => {
       return sum + (order.total_quantity || 0);
     }, 0);
+  };
+
+  // Helper function to get count of selected orders that are visible in current filtered view
+  const getVisibleSelectedOrdersCount = () => {
+    if (activeTab !== "my-orders") return 0;
+    const visibleOrders = getFilteredOrdersForTab("my-orders");
+    return visibleOrders.filter(order => selectedMyOrders.includes(order.order_id)).length;
   };
 
   const handleRefreshOrders = async () => {
@@ -2963,7 +3003,7 @@ export function VendorDashboard() {
                       </div>
                       <Button
                         onClick={() => handleBulkDownloadLabels("my-orders")}
-                        disabled={selectedMyOrders.length === 0 || bulkDownloadLoading}
+                        disabled={getVisibleSelectedOrdersCount() === 0 || bulkDownloadLoading}
                         className="h-10 text-sm whitespace-nowrap px-4 min-w-fit bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg text-white"
                       >
                         {bulkDownloadLoading ? (
@@ -2974,14 +3014,14 @@ export function VendorDashboard() {
                         ) : (
                           <>
                             <Download className="w-4 h-4 mr-2" />
-                            Download ({selectedMyOrders.length})
+                            Download ({getVisibleSelectedOrdersCount()})
                           </>
                         )}
                       </Button>
                       <Button
                         onClick={() => handleBulkMarkReady()}
                         disabled={
-                          selectedMyOrders.length === 0 || 
+                          getVisibleSelectedOrdersCount() === 0 || 
                           bulkMarkReadyLoading ||
                           getFilteredOrdersForTab("my-orders")
                             .filter(order => selectedMyOrders.includes(order.order_id))
@@ -3004,7 +3044,7 @@ export function VendorDashboard() {
                         ) : (
                           <>
                             <CheckCircle className="w-4 h-4 mr-2" />
-                            Mark Ready ({selectedMyOrders.length})
+                            Mark Ready ({getVisibleSelectedOrdersCount()})
                           </>
                         )}
                       </Button>
@@ -3946,7 +3986,7 @@ export function VendorDashboard() {
                       {/* Download Label Button */}
                       <Button 
                         onClick={() => handleBulkDownloadLabels("my-orders")}
-                        disabled={selectedMyOrders.length === 0 || bulkDownloadLoading}
+                        disabled={getVisibleSelectedOrdersCount() === 0 || bulkDownloadLoading}
                         className="flex-1 h-10 sm:h-12 text-xs sm:text-sm md:text-base font-medium bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg min-w-0 px-2 sm:px-3"
                       >
                         {bulkDownloadLoading ? (
@@ -3960,7 +4000,7 @@ export function VendorDashboard() {
                             <span className="whitespace-nowrap flex items-center">
                               <span className="hidden min-[360px]:inline">Download</span>
                               <span className="inline min-[360px]:hidden">DL</span>
-                              <span className="ml-1">({selectedMyOrders.length})</span>
+                              <span className="ml-1">({getVisibleSelectedOrdersCount()})</span>
                             </span>
                           </div>
                         )}
@@ -3970,7 +4010,7 @@ export function VendorDashboard() {
                       <Button 
                         onClick={() => handleBulkMarkReady()}
                         disabled={
-                          selectedMyOrders.length === 0 || 
+                          getVisibleSelectedOrdersCount() === 0 || 
                           bulkMarkReadyLoading ||
                           getFilteredOrdersForTab("my-orders")
                             .filter(order => selectedMyOrders.includes(order.order_id))
@@ -3988,7 +4028,7 @@ export function VendorDashboard() {
                             <CheckCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5 mr-1 sm:mr-1.5 flex-shrink-0" />
                             <span className="whitespace-nowrap flex items-center">
                               <span>Ready</span>
-                              <span className="ml-1">({selectedMyOrders.length})</span>
+                              <span className="ml-1">({getVisibleSelectedOrdersCount()})</span>
                             </span>
                           </div>
                         )}

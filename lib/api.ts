@@ -350,6 +350,12 @@ class ApiClient {
     return this.makeRequest('/orders/admin/all');
   }
 
+  async refreshAdminOrders(): Promise<ApiResponse> {
+    return this.makeRequest('/orders/admin/refresh', {
+      method: 'POST',
+    });
+  }
+
   async getAdminVendors(): Promise<ApiResponse> {
     // Prefer enriched vendors report for admin auditing table
     return this.makeRequest('/users/vendors-report');
@@ -715,8 +721,11 @@ class ApiClient {
   }
 
   // Carrier management methods
-  async getCarriers(): Promise<ApiResponse> {
-    return this.makeRequest('/shipway/carriers/local')
+  async getCarriers(accountCode?: string): Promise<ApiResponse> {
+    const url = accountCode 
+      ? `/shipway/carriers/local?account_code=${encodeURIComponent(accountCode)}`
+      : '/shipway/carriers/local'
+    return this.makeRequest(url)
   }
 
   async syncCarriers(): Promise<ApiResponse> {
@@ -742,10 +751,10 @@ class ApiClient {
     })
   }
 
-  async moveCarrier(carrierId: string, direction: 'up' | 'down'): Promise<ApiResponse> {
+  async moveCarrier(carrierId: string, direction: 'up' | 'down', accountCode: string): Promise<ApiResponse> {
     return this.makeRequest(`/shipway/carriers/${encodeURIComponent(carrierId)}/move`, {
       method: 'POST',
-      body: JSON.stringify({ direction }),
+      body: JSON.stringify({ direction, account_code: accountCode }),
     })
   }
 
@@ -792,6 +801,7 @@ class ApiClient {
       
       const formData = new FormData();
       formData.append('csvFile', file, file.name); // Add filename explicitly
+      // Note: account_code should be in CSV file itself for multi-store upload
 
       console.log('🔍 Uploading file:', {
         name: file.name,
@@ -836,6 +846,122 @@ class ApiClient {
 
   async getCarrierFormat(): Promise<ApiResponse> {
     return this.makeRequest('/shipway/carrier-format')
+  }
+
+  // Store methods
+  async getStoresForFilter(): Promise<ApiResponse> {
+    return this.makeRequest('/stores/list-for-filter')
+  }
+
+  async getAllStores(): Promise<ApiResponse> {
+    return this.makeRequest('/stores')
+  }
+
+  async getStoreByCode(accountCode: string): Promise<ApiResponse> {
+    return this.makeRequest(`/stores/${accountCode}`)
+  }
+
+  async getShippingPartners(): Promise<ApiResponse> {
+    return this.makeRequest('/stores/shipping-partners')
+  }
+
+  async createStore(storeData: {
+    store_name: string
+    shipping_partner: string
+    username: string
+    password: string
+    shopify_store_url: string
+    shopify_token: string
+    status: 'active' | 'inactive'
+  }): Promise<ApiResponse> {
+    return this.makeRequest('/stores', {
+      method: 'POST',
+      body: JSON.stringify(storeData)
+    })
+  }
+
+  async updateStore(accountCode: string, storeData: {
+    store_name?: string
+    username?: string
+    password?: string
+    shopify_store_url?: string
+    shopify_token?: string
+    status?: 'active' | 'inactive'
+  }): Promise<ApiResponse> {
+    return this.makeRequest(`/stores/${accountCode}`, {
+      method: 'PUT',
+      body: JSON.stringify(storeData)
+    })
+  }
+
+  async deleteStore(accountCode: string): Promise<ApiResponse> {
+    return this.makeRequest(`/stores/${accountCode}`, {
+      method: 'DELETE'
+    })
+  }
+
+  async toggleStoreStatus(accountCode: string): Promise<ApiResponse> {
+    return this.makeRequest(`/stores/${accountCode}/toggle-status`, {
+      method: 'PATCH'
+    })
+  }
+
+  // Warehouse Mapping API methods (Superadmin only)
+  async getAllWhMappings(includeInactive: boolean = true): Promise<ApiResponse> {
+    return this.makeRequest(`/warehouse-mapping?includeInactive=${includeInactive}`);
+  }
+
+  async getWhMappingVendors(): Promise<ApiResponse> {
+    return this.makeRequest('/warehouse-mapping/vendors');
+  }
+
+  async getWhMappingStores(): Promise<ApiResponse> {
+    return this.makeRequest('/warehouse-mapping/stores');
+  }
+
+  async validateVendorWhId(vendor_wh_id: string, account_code: string): Promise<ApiResponse> {
+    return this.makeRequest('/warehouse-mapping/validate', {
+      method: 'POST',
+      body: JSON.stringify({ vendor_wh_id, account_code })
+    });
+  }
+
+  async createWhMapping(mappingData: {
+    claimio_wh_id: string;
+    vendor_wh_id: string;
+    account_code: string;
+    return_warehouse_id?: string;
+  }): Promise<ApiResponse> {
+    return this.makeRequest('/warehouse-mapping', {
+      method: 'POST',
+      body: JSON.stringify(mappingData)
+    });
+  }
+
+  async deleteWhMapping(id: number): Promise<ApiResponse> {
+    return this.makeRequest(`/warehouse-mapping/${id}`, {
+      method: 'DELETE'
+    });
+  }
+
+  async testShipwayConnection(credentials: {
+    username: string
+    password: string
+  }): Promise<ApiResponse> {
+    return this.makeRequest('/stores/test-shipway', {
+      method: 'POST',
+      body: JSON.stringify(credentials)
+    })
+  }
+
+  async testShopifyConnection(credentials: {
+    shopify_store_url: string
+    shopify_token: string
+  }): Promise<ApiResponse> {
+    return this.makeRequest('/stores/test-shopify', {
+      method: 'POST',
+      body: JSON.stringify(credentials)
+    })
   }
 
   // Download label methods
