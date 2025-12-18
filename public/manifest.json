@@ -1,6 +1,6 @@
 {
-  "name": "Claimio",
-  "short_name": "Claimio",
+  "name": "CLAIMIO - Striker Store",
+  "short_name": "CLAIMIO",
   "description": "Self-service vendor portal for managing Shopify orders",
   "start_url": "/?source=pwa",
   "display": "standalone",
