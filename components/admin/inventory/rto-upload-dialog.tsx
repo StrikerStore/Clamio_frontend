@@ -32,7 +32,7 @@ interface RTOInventoryItem {
 }
 
 interface RTOUploadDialogProps {
-  onRTODataUploaded: (rtoData: any[]) => void;
+  onRTODataUploaded: (rtoData?: any[]) => void;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }
@@ -229,10 +229,12 @@ export function RTOUploadDialog({ onRTODataUploaded, open: controlledOpen, onOpe
           title: "Changes Saved",
           description: `Updated ${data.data.updatedCount} items successfully.`,
         });
-        // Refresh data
+        // Refresh local data
         await fetchRTOInventory();
-        // Notify parent to refresh inventory display
-        onRTODataUploaded([]);
+        // Notify parent to refresh its inventory display
+        onRTODataUploaded();
+        // Close dialog
+        setOpen(false);
       } else {
         throw new Error(data.error || "Failed to save changes");
       }
@@ -253,8 +255,8 @@ export function RTOUploadDialog({ onRTODataUploaded, open: controlledOpen, onOpe
       <DialogTrigger asChild>
         <Button variant="outline" className="w-full h-10 text-xs flex items-center justify-center sm:w-auto sm:h-auto sm:text-sm" data-rto-upload-trigger>
           <Upload className="w-3.5 h-3.5 mr-1.5 sm:w-4 sm:h-4 sm:mr-2" />
-          <span className="sm:hidden">RTO</span>
-          <span className="hidden sm:inline">Upload RTO</span>
+          <span className="sm:hidden">Update</span>
+          <span className="hidden sm:inline">Update RTO</span>
         </Button>
       </DialogTrigger>
       <DialogContent className="w-[calc(100vw-1rem)] max-w-2xl h-[90vh] sm:h-[85vh] p-0 flex flex-col">
@@ -283,11 +285,10 @@ export function RTOUploadDialog({ onRTODataUploaded, open: controlledOpen, onOpe
               />
             </div>
 
-            {/* Location Filter */}
+            {/* Location Filter - Icon only */}
             <Select value={selectedLocation} onValueChange={setSelectedLocation}>
-              <SelectTrigger className="w-[140px] sm:w-[180px] h-9">
-                <Filter className="w-4 h-4 mr-1.5 text-gray-400 flex-shrink-0" />
-                <SelectValue placeholder="All Locations" />
+              <SelectTrigger className="w-10 h-9 px-0 justify-center [&>svg:last-child]:hidden">
+                <Filter className={`w-4 h-4 ${selectedLocation !== 'all' ? 'text-blue-600' : 'text-gray-400'}`} />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Locations</SelectItem>
@@ -324,7 +325,7 @@ export function RTOUploadDialog({ onRTODataUploaded, open: controlledOpen, onOpe
                         <MapPin className="w-3.5 h-3.5" />
                         <span className="font-medium">{location}</span>
                       </div>
-                      <div className="text-sm font-semibold text-gray-900 mt-0.5 truncate">
+                      <div className="text-sm font-semibold text-gray-900 mt-0.5 break-words whitespace-normal">
                         {productName}
                       </div>
                     </div>

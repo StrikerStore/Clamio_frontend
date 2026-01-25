@@ -138,14 +138,14 @@ export const InventoryAggregation = forwardRef<InventoryAggregationRef, Inventor
     };
 
     /**
-     * Handle RTO data upload (placeholder for future use)
+     * Handle RTO data update - refetch from database
      */
-    const handleRTODataUploaded = (data: RTOEntry[]) => {
-      // Placeholder - kept for future functionality
-      setRTOData(data);
+    const handleRTODataUploaded = async () => {
+      // Refetch RTO data from database to get latest
+      await fetchRTOInventory();
       toast({
-        title: "RTO Data Loaded",
-        description: `${data.length} RTO entries loaded successfully.`,
+        title: "RTO Data Updated",
+        description: "RTO inventory has been refreshed.",
       });
     };
 
@@ -908,8 +908,8 @@ export const InventoryAggregation = forwardRef<InventoryAggregationRef, Inventor
               </Button>
               <div data-rto-upload-trigger>
                 <RTOUploadDialog
-                  onRTODataUploaded={(data) => {
-                    handleRTODataUploaded(data);
+                  onRTODataUploaded={() => {
+                    handleRTODataUploaded();
                     setShowRTODialog(false);
                   }}
                   open={showRTODialog}
