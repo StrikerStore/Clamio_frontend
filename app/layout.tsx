@@ -8,7 +8,7 @@ import { Toaster } from "@/components/ui/toaster"
 const inter = Inter({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "Striker Store - CLAIMIO",
+  title: "CLAIMIO",
   description: "Self-service vendor portal for managing Shopify orders",
   generator: 'v0.dev',
   applicationName: 'CLAIMIO',
@@ -23,12 +23,12 @@ export const metadata: Metadata = {
   openGraph: {
     type: 'website',
     siteName: 'CLAIMIO',
-    title: 'Striker Store - CLAIMIO',
+    title: 'CLAIMIO',
     description: 'Self-service vendor portal for managing Shopify orders',
   },
   twitter: {
     card: 'summary',
-    title: 'Striker Store - CLAIMIO',
+    title: 'CLAIMIO',
     description: 'Self-service vendor portal for managing Shopify orders',
   },
   manifest: '/manifest.json',
