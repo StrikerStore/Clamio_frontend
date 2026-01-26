@@ -506,6 +506,10 @@ class ApiClient {
     return this.makeRequest('/users/vendors-report');
   }
 
+  async getDistinctOrderStatuses(): Promise<ApiResponse> {
+    return this.makeRequest('/orders/distinct-statuses')
+  }
+
   async getVendorStats(): Promise<ApiResponse> {
     // Lightweight endpoint for vendor counts only (for dashboard cards)
     return this.makeRequest('/users/vendors-stats');

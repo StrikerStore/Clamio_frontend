@@ -356,6 +356,13 @@ export function AdminDashboard() {
   const [vendorStatsLoading, setVendorStatsLoading] = useState(false)
   const [inventoryProductCount, setInventoryProductCount] = useState<number>(0)
   const lastVendorRefreshRef = useRef<number>(0) // Track last vendor refresh time
+
+  // Distinct Statuses state for filters
+  const [allStatuses, setAllStatuses] = useState<string[]>([])
+  const [allStatusesLoading, setAllStatusesLoading] = useState(false)
+  const [allStatusesLoaded, setAllStatusesLoaded] = useState(false)
+  const [statusFilterPopoverOpen, setStatusFilterPopoverOpen] = useState(false)
+  const lastStatusRefreshRef = useRef<number>(0)
   const inventoryAggregationRef = useRef<InventoryAggregationRef>(null)
 
   // Cache system for all tabs
@@ -1634,6 +1641,22 @@ export function AdminDashboard() {
     }
   }, [vendorFilterPopoverOpen, vendorsLoaded, vendorsLoading, vendors.length]);
 
+  // Load distinct statuses when status filter popover opens
+  useEffect(() => {
+    if (statusFilterPopoverOpen) {
+      if (!allStatusesLoaded && !allStatusesLoading) {
+        // First time - load statuses
+        console.log('📦 Status filter dropdown opened - loading statuses...');
+        fetchDistinctStatuses();
+      } else if (allStatusesLoaded && allStatuses.length > 0) {
+        // Statuses are cached - show cached data immediately and refresh in background
+        console.log('📦 Status filter dropdown opened - using cached statuses, refreshing in background...');
+        // Silently refresh in background without showing loading state
+        fetchDistinctStatuses(true);
+      }
+    }
+  }, [statusFilterPopoverOpen, allStatusesLoaded, allStatusesLoading]);
+
   // Load vendors when vendor filters are applied (needed for name to warehouse ID mapping)
   useEffect(() => {
     if (selectedVendorFilters.length > 0 && !vendorsLoaded && !vendorsLoading) {
@@ -1838,6 +1861,24 @@ export function AdminDashboard() {
       });
     } finally {
       setVendorsLoading(false);
+    }
+  };
+
+  const fetchDistinctStatuses = async (silent = false) => {
+    if (!silent) setAllStatusesLoading(true);
+    try {
+      console.log('📋 Fetching distinct statuses...');
+      const response = await apiClient.getDistinctOrderStatuses();
+      if (response.success && response.data) {
+        setAllStatuses(response.data);
+        setAllStatusesLoaded(true);
+        lastStatusRefreshRef.current = Date.now();
+        console.log(`✅ Loaded ${response.data.length} distinct statuses`);
+      }
+    } catch (error) {
+      console.error('Error fetching distinct statuses:', error);
+    } finally {
+      if (!silent) setAllStatusesLoading(false);
     }
   };
 
@@ -3015,7 +3056,7 @@ export function AdminDashboard() {
                                   {/* Status Filter */}
                                   <div>
                                     <Label className="text-xs font-medium mb-2 block">Status</Label>
-                                    <Popover>
+                                    <Popover open={statusFilterPopoverOpen} onOpenChange={setStatusFilterPopoverOpen}>
                                       <PopoverTrigger asChild>
                                         <Button variant="outline" className="w-full h-9 justify-between text-left font-normal">
                                           <span className="truncate">
@@ -3044,37 +3085,46 @@ export function AdminDashboard() {
                                             )}
                                           </div>
                                           <div className="max-h-48 overflow-y-auto space-y-1">
-                                            <label className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
-                                              <input
-                                                type="checkbox"
-                                                checked={statusFilter.length === 0}
-                                                onChange={(e) => {
-                                                  if (e.target.checked) {
-                                                    setStatusFilter([])
-                                                  }
-                                                }}
-                                                className="w-4 h-4"
-                                              />
-                                              <span className="text-xs">All Status</span>
-                                            </label>
-                                            {getUniqueStatuses().map((status) => (
-                                              <label key={status} className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
-                                                <input
-                                                  type="checkbox"
-                                                  checked={statusFilter.includes(status)}
-                                                  onChange={(e) => {
-                                                    if (e.target.checked) {
-                                                      setStatusFilter([...statusFilter, status])
-                                                    } else {
-                                                      const newFilters = statusFilter.filter(s => s !== status)
-                                                      setStatusFilter(newFilters)
-                                                    }
-                                                  }}
-                                                  className="w-4 h-4"
-                                                />
-                                                <span className="text-xs">{status.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}</span>
-                                              </label>
-                                            ))}
+                                            {allStatusesLoading && allStatuses.length === 0 ? (
+                                              <div className="flex items-center justify-center py-2">
+                                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-900"></div>
+                                                <span className="text-xs ml-2 text-gray-500">Loading...</span>
+                                              </div>
+                                            ) : (
+                                              <>
+                                                <label className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                                                  <input
+                                                    type="checkbox"
+                                                    checked={statusFilter.length === 0}
+                                                    onChange={(e) => {
+                                                      if (e.target.checked) {
+                                                        setStatusFilter([])
+                                                      }
+                                                    }}
+                                                    className="w-4 h-4"
+                                                  />
+                                                  <span className="text-xs">All Status</span>
+                                                </label>
+                                                {allStatuses.map((status) => (
+                                                  <label key={status} className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                                                    <input
+                                                      type="checkbox"
+                                                      checked={statusFilter.includes(status)}
+                                                      onChange={(e) => {
+                                                        if (e.target.checked) {
+                                                          setStatusFilter([...statusFilter, status])
+                                                        } else {
+                                                          const newFilters = statusFilter.filter(s => s !== status)
+                                                          setStatusFilter(newFilters)
+                                                        }
+                                                      }}
+                                                      className="w-4 h-4"
+                                                    />
+                                                    <span className="text-xs">{status.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}</span>
+                                                  </label>
+                                                ))}
+                                              </>
+                                            )}
                                           </div>
                                         </div>
                                       </PopoverContent>
@@ -3311,7 +3361,7 @@ export function AdminDashboard() {
                         {/* Status Filter for Non-Orders tabs and Desktop (exclude vendors mobile as it's inline) */}
                         {(activeTab !== "orders" || !isMobile) && !(activeTab === "vendors" && isMobile) && (
                           activeTab === "orders" ? (
-                            <Popover>
+                            <Popover open={statusFilterPopoverOpen} onOpenChange={setStatusFilterPopoverOpen}>
                               <PopoverTrigger asChild>
                                 <Button variant="outline" className="w-full sm:w-40 justify-between text-left font-normal">
                                   <Filter className="w-4 h-4 mr-2" />
@@ -3341,37 +3391,46 @@ export function AdminDashboard() {
                                     )}
                                   </div>
                                   <div className="max-h-48 overflow-y-auto space-y-1">
-                                    <label className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
-                                      <input
-                                        type="checkbox"
-                                        checked={statusFilter.length === 0}
-                                        onChange={(e) => {
-                                          if (e.target.checked) {
-                                            setStatusFilter([])
-                                          }
-                                        }}
-                                        className="w-4 h-4"
-                                      />
-                                      <span className="text-xs">All Status</span>
-                                    </label>
-                                    {getUniqueStatuses().map((status) => (
-                                      <label key={status} className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
-                                        <input
-                                          type="checkbox"
-                                          checked={statusFilter.includes(status)}
-                                          onChange={(e) => {
-                                            if (e.target.checked) {
-                                              setStatusFilter([...statusFilter, status])
-                                            } else {
-                                              const newFilters = statusFilter.filter(s => s !== status)
-                                              setStatusFilter(newFilters)
-                                            }
-                                          }}
-                                          className="w-4 h-4"
-                                        />
-                                        <span className="text-xs">{status.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}</span>
-                                      </label>
-                                    ))}
+                                    {allStatusesLoading && allStatuses.length === 0 ? (
+                                      <div className="flex items-center justify-center py-2">
+                                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-900"></div>
+                                        <span className="text-xs ml-2 text-gray-500">Loading...</span>
+                                      </div>
+                                    ) : (
+                                      <>
+                                        <label className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                                          <input
+                                            type="checkbox"
+                                            checked={statusFilter.length === 0}
+                                            onChange={(e) => {
+                                              if (e.target.checked) {
+                                                setStatusFilter([])
+                                              }
+                                            }}
+                                            className="w-4 h-4"
+                                          />
+                                          <span className="text-xs">All Status</span>
+                                        </label>
+                                        {allStatuses.map((status) => (
+                                          <label key={status} className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                                            <input
+                                              type="checkbox"
+                                              checked={statusFilter.includes(status)}
+                                              onChange={(e) => {
+                                                if (e.target.checked) {
+                                                  setStatusFilter([...statusFilter, status])
+                                                } else {
+                                                  const newFilters = statusFilter.filter(s => s !== status)
+                                                  setStatusFilter(newFilters)
+                                                }
+                                              }}
+                                              className="w-4 h-4"
+                                            />
+                                            <span className="text-xs">{status.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}</span>
+                                          </label>
+                                        ))}
+                                      </>
+                                    )}
                                   </div>
                                 </div>
                               </PopoverContent>
