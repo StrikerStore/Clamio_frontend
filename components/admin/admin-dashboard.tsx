@@ -67,6 +67,7 @@ import {
   Store,
   Loader2,
   Share2,
+  Target,
 } from "lucide-react"
 import { useAuth } from "@/components/auth/auth-provider"
 import { useToast } from "@/hooks/use-toast"
@@ -75,6 +76,7 @@ import { useEffect, useMemo, useRef, useCallback } from "react"
 import { useDeviceType } from "@/hooks/use-mobile"
 import { InventoryAggregation, InventoryAggregationRef } from "@/components/admin/inventory/inventory-aggregation"
 import { NotificationDialog } from "./notification-dialog"
+import { RTOFocusDialog } from "./inventory/rto-focus-dialog"
 
 // Mock data for admin dashboard
 const mockVendors = [
@@ -334,6 +336,9 @@ export function AdminDashboard() {
     statuses: []
   })
   const [showProofDialog, setShowProofDialog] = useState(false)
+
+  // RTO Focus dialog state
+  const [showRTOFocusDialog, setShowRTOFocusDialog] = useState(false)
 
   // Image modal state
   const [selectedImageUrl, setSelectedImageUrl] = useState<string | null>(null)
@@ -2325,6 +2330,17 @@ export function AdminDashboard() {
                   )}
                 </Button>
 
+                {/* RTO Focus Button */}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowRTOFocusDialog(true)}
+                  className="p-2 relative"
+                  title="RTO Focus Orders"
+                >
+                  <Target className="w-5 h-5 text-orange-500" />
+                </Button>
+
                 <div className="text-right">
                   <p className="text-sm sm:text-base font-medium text-gray-900 truncate max-w-[120px]">{user?.name}</p>
                   <p className="text-sm text-gray-500 break-all max-w-[200px]">{user?.email}</p>
@@ -2359,6 +2375,20 @@ export function AdminDashboard() {
                       {notificationStats.pending > 99 ? '99+' : notificationStats.pending}
                     </span>
                   )}
+                </Button>
+
+                {/* RTO Focus Button */}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setShowRTOFocusDialog(true);
+                    setIsMobileMenuOpen(false);
+                  }}
+                  className="p-2"
+                  title="RTO Focus Orders"
+                >
+                  <Target className="w-5 h-5 text-orange-500" />
                 </Button>
 
                 {/* Inventory Icon */}
@@ -6464,6 +6494,12 @@ export function AdminDashboard() {
           fetchNotificationStats();
           // Refresh other data if needed
         }}
+      />
+
+      {/* RTO Focus Dialog */}
+      <RTOFocusDialog
+        isOpen={showRTOFocusDialog}
+        onClose={() => setShowRTOFocusDialog(false)}
       />
     </div>
   )

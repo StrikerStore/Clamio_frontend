@@ -1551,6 +1551,28 @@ class ApiClient {
       body: JSON.stringify({ enabled })
     })
   }
+
+  // ==================== RTO FOCUS METHODS ====================
+
+  /**
+   * Get RTO focus orders (is_focus = 1, instance_number = 1)
+   * These are orders that need attention (RTO Initiated > 7 days and not delivered)
+   */
+  async getRTOFocusOrders(accountCode?: string): Promise<ApiResponse> {
+    const queryParams = accountCode ? `?account_code=${encodeURIComponent(accountCode)}` : '';
+    return this.makeRequest(`/admin/inventory/rto-focus${queryParams}`)
+  }
+
+  /**
+   * Update RTO focus orders status (batch update)
+   * Updates order_status and sets is_focus = 0
+   */
+  async updateRTOFocusStatus(orderIds: string[], newStatus: string, accountCode?: string): Promise<ApiResponse> {
+    return this.makeRequest('/admin/inventory/rto-focus/status', {
+      method: 'PUT',
+      body: JSON.stringify({ orderIds, newStatus, accountCode })
+    })
+  }
 }
 
 // Export singleton instance
