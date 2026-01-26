@@ -352,8 +352,8 @@ export function RTOFocusDialog({ isOpen, onClose }: RTOFocusDialogProps) {
                                     <Card
                                         key={order.order_id}
                                         className={`cursor-pointer transition-all ${selectedOrders.includes(order.order_id)
-                                                ? "ring-2 ring-orange-500 bg-orange-50"
-                                                : "hover:bg-gray-50"
+                                            ? "ring-2 ring-orange-500 bg-orange-50"
+                                            : "hover:bg-gray-50"
                                             }`}
                                         onClick={() => handleSelectOrder(order.order_id)}
                                     >
@@ -455,43 +455,45 @@ export function RTOFocusDialog({ isOpen, onClose }: RTOFocusDialogProps) {
                 </div>
 
                 {/* Fixed Action Bar */}
-                <div className="px-4 py-3 border-t bg-white flex flex-wrap gap-2 justify-between items-center">
-                    <div className="text-sm text-gray-500">
-                        {selectedOrders.length > 0 ? (
-                            <span>{selectedOrders.length} selected</span>
-                        ) : (
-                            <span>{filteredOrders.length} orders</span>
-                        )}
-                    </div>
-                    <div className="flex gap-2">
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setShowStatusDialog(true)}
-                            disabled={selectedOrders.length === 0}
-                            className="h-9"
-                        >
-                            <CheckCircle className="w-4 h-4 mr-1" />
-                            Change Status
-                        </Button>
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={handleCopyAWB}
-                            className="h-9"
-                        >
-                            <Copy className="w-4 h-4 mr-1" />
-                            Copy AWB
-                        </Button>
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={handleCopyOrderIds}
-                            className="h-9"
-                        >
-                            <Copy className="w-4 h-4 mr-1" />
-                            Copy Order ID
-                        </Button>
+                <div className="px-2 sm:px-4 py-2 sm:py-3 border-t bg-white">
+                    <div className="flex items-center justify-between gap-2">
+                        <div className="text-xs sm:text-sm text-gray-500 flex-shrink-0">
+                            {selectedOrders.length > 0 ? (
+                                <span>{selectedOrders.length} sel</span>
+                            ) : (
+                                <span>{filteredOrders.length}</span>
+                            )}
+                        </div>
+                        <div className="flex gap-1 sm:gap-2">
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setShowStatusDialog(true)}
+                                disabled={selectedOrders.length === 0}
+                                className="h-8 sm:h-9 px-2 sm:px-3 text-xs sm:text-sm"
+                            >
+                                <CheckCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4 sm:mr-1" />
+                                <span className="hidden sm:inline">Status</span>
+                            </Button>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={handleCopyAWB}
+                                className="h-8 sm:h-9 px-2 sm:px-3 text-xs sm:text-sm"
+                            >
+                                <Copy className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1" />
+                                AWB
+                            </Button>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={handleCopyOrderIds}
+                                className="h-8 sm:h-9 px-2 sm:px-3 text-xs sm:text-sm"
+                            >
+                                <Copy className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1" />
+                                <span className="hidden sm:inline">Order </span>ID
+                            </Button>
+                        </div>
                     </div>
                 </div>
 
