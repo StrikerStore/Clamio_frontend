@@ -472,8 +472,8 @@ export function RTOFocusDialog({ isOpen, onClose }: RTOFocusDialogProps) {
                                 disabled={selectedOrders.length === 0}
                                 className="h-8 sm:h-9 px-2 sm:px-3 text-xs sm:text-sm"
                             >
-                                <CheckCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4 sm:mr-1" />
-                                <span className="hidden sm:inline">Status</span>
+                                <CheckCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1" />
+                                Status
                             </Button>
                             <Button
                                 variant="outline"
