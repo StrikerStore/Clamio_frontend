@@ -227,7 +227,7 @@ export function RTOManualEntryDialog({
                                             Loading...
                                         </span>
                                     ) : location ? (
-                                        location
+                                        <span className="truncate">{location}</span>
                                     ) : (
                                         "Select or type location..."
                                     )}
