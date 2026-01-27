@@ -1577,6 +1577,45 @@ class ApiClient {
       body: JSON.stringify({ orderIds, newStatus, accountCode })
     })
   }
+
+  // ==================== RTO MANUAL ENTRY METHODS ====================
+
+  /**
+   * Get distinct RTO warehouse locations for dropdown
+   */
+  async getRTOLocations(): Promise<ApiResponse> {
+    return this.makeRequest('/admin/inventory/rto-locations')
+  }
+
+  /**
+   * Get products for RTO dropdown
+   */
+  async getRTOProducts(): Promise<ApiResponse> {
+    return this.makeRequest('/admin/inventory/rto-products')
+  }
+
+  /**
+   * Get sizes for a specific product
+   */
+  async getRTOSizesForProduct(skuId: string): Promise<ApiResponse> {
+    return this.makeRequest(`/admin/inventory/rto-sizes/${encodeURIComponent(skuId)}`)
+  }
+
+  /**
+   * Add manual RTO inventory entry
+   * Uses upsert logic - adds to existing quantity if row exists
+   */
+  async addManualRTOEntry(data: {
+    location: string
+    sku_id: string
+    size: string
+    quantity: number
+  }): Promise<ApiResponse> {
+    return this.makeRequest('/admin/inventory/rto-manual', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+  }
 }
 
 // Export singleton instance

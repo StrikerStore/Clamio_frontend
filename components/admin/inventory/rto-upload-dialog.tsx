@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/select";
 import { Upload, Search, Filter, Plus, Minus, Loader2, Package, MapPin } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { RTOManualEntryDialog } from "./rto-manual-entry-dialog";
 
 interface RTOInventoryItem {
   id: number;
@@ -48,6 +49,7 @@ export function RTOUploadDialog({ onRTODataUploaded, open: controlledOpen, onOpe
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedLocation, setSelectedLocation] = useState<string>("all");
   const [modifiedItems, setModifiedItems] = useState<Map<number, number>>(new Map());
+  const [showManualEntryDialog, setShowManualEntryDialog] = useState(false);
   const { toast } = useToast();
 
   // Fetch RTO inventory when dialog opens
@@ -299,8 +301,29 @@ export function RTOUploadDialog({ onRTODataUploaded, open: controlledOpen, onOpe
                 ))}
               </SelectContent>
             </Select>
+
+            {/* Add RTO Button */}
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-9 w-9 shrink-0"
+              onClick={() => setShowManualEntryDialog(true)}
+              title="Add RTO Entry"
+            >
+              <Plus className="w-4 h-4" />
+            </Button>
           </div>
         </div>
+
+        {/* Manual Entry Dialog */}
+        <RTOManualEntryDialog
+          open={showManualEntryDialog}
+          onOpenChange={setShowManualEntryDialog}
+          onEntryAdded={() => {
+            fetchRTOInventory();
+            onRTODataUploaded();
+          }}
+        />
 
         {/* Cards Container - Scrollable */}
         <div className="flex-1 overflow-y-auto px-4 py-3 sm:px-6">
