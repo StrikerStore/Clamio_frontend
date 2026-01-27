@@ -58,18 +58,15 @@ export function RTOManualEntryDialog({
     // Dropdown data
     const [locations, setLocations] = useState<string[]>([]);
     const [products, setProducts] = useState<Product[]>([]);
-    const [sizes, setSizes] = useState<string[]>([]);
 
     // Loading states
     const [loadingLocations, setLoadingLocations] = useState(false);
     const [loadingProducts, setLoadingProducts] = useState(false);
-    const [loadingSizes, setLoadingSizes] = useState(false);
     const [submitting, setSubmitting] = useState(false);
 
     // Dropdown open states
     const [locationOpen, setLocationOpen] = useState(false);
     const [productOpen, setProductOpen] = useState(false);
-    const [sizeOpen, setSizeOpen] = useState(false);
 
     const { toast } = useToast();
 
@@ -83,17 +80,12 @@ export function RTOManualEntryDialog({
             setSelectedProduct(null);
             setSelectedSize("");
             setQuantity(1);
-            setSizes([]);
         }
     }, [open]);
 
-    // Fetch sizes when product changes
+    // Reset size when product changes
     useEffect(() => {
         if (selectedProduct) {
-            fetchSizes(selectedProduct.sku_id);
-            setSelectedSize(""); // Reset size when product changes
-        } else {
-            setSizes([]);
             setSelectedSize("");
         }
     }, [selectedProduct]);
@@ -123,20 +115,6 @@ export function RTOManualEntryDialog({
             console.error("Error fetching products:", error);
         } finally {
             setLoadingProducts(false);
-        }
-    };
-
-    const fetchSizes = async (skuId: string) => {
-        setLoadingSizes(true);
-        try {
-            const response = await apiClient.getRTOSizesForProduct(skuId);
-            if (response.success) {
-                setSizes(response.data.sizes || []);
-            }
-        } catch (error) {
-            console.error("Error fetching sizes:", error);
-        } finally {
-            setLoadingSizes(false);
         }
     };
 
@@ -312,7 +290,7 @@ export function RTOManualEntryDialog({
                                     variant="outline"
                                     role="combobox"
                                     aria-expanded={productOpen}
-                                    className="w-full justify-between h-10"
+                                    className="w-full justify-between min-h-10 h-auto py-2"
                                     disabled={loadingProducts}
                                 >
                                     {loadingProducts ? (
@@ -321,7 +299,7 @@ export function RTOManualEntryDialog({
                                             Loading...
                                         </span>
                                     ) : selectedProduct ? (
-                                        <span className="truncate">{selectedProduct.name}</span>
+                                        <span className="text-left break-words whitespace-normal line-clamp-2">{selectedProduct.name}</span>
                                     ) : (
                                         "Select product..."
                                     )}
@@ -365,63 +343,13 @@ export function RTOManualEntryDialog({
                             <Ruler className="w-4 h-4 text-gray-500" />
                             Size
                         </Label>
-                        <Popover open={sizeOpen} onOpenChange={setSizeOpen}>
-                            <PopoverTrigger asChild>
-                                <Button
-                                    variant="outline"
-                                    role="combobox"
-                                    aria-expanded={sizeOpen}
-                                    className="w-full justify-between h-10"
-                                    disabled={!selectedProduct || loadingSizes}
-                                >
-                                    {loadingSizes ? (
-                                        <span className="flex items-center gap-2">
-                                            <Loader2 className="w-4 h-4 animate-spin" />
-                                            Loading sizes...
-                                        </span>
-                                    ) : !selectedProduct ? (
-                                        "Select a product first..."
-                                    ) : selectedSize ? (
-                                        selectedSize
-                                    ) : (
-                                        "Select size..."
-                                    )}
-                                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                                </Button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-[350px] p-0">
-                                <Command>
-                                    <CommandInput placeholder="Search sizes..." />
-                                    <CommandList>
-                                        <CommandEmpty>
-                                            {sizes.length === 0
-                                                ? "No sizes found for this product."
-                                                : "No matching sizes."}
-                                        </CommandEmpty>
-                                        <CommandGroup>
-                                            {sizes.map((size) => (
-                                                <CommandItem
-                                                    key={size}
-                                                    value={size}
-                                                    onSelect={() => {
-                                                        setSelectedSize(size);
-                                                        setSizeOpen(false);
-                                                    }}
-                                                >
-                                                    <Check
-                                                        className={cn(
-                                                            "mr-2 h-4 w-4",
-                                                            selectedSize === size ? "opacity-100" : "opacity-0"
-                                                        )}
-                                                    />
-                                                    {size}
-                                                </CommandItem>
-                                            ))}
-                                        </CommandGroup>
-                                    </CommandList>
-                                </Command>
-                            </PopoverContent>
-                        </Popover>
+                        <Input
+                            type="text"
+                            value={selectedSize}
+                            onChange={(e) => setSelectedSize(e.target.value)}
+                            className="h-10"
+                            placeholder="Enter size (e.g., M, XL, 28-30, 7, 8)"
+                        />
                     </div>
 
                     {/* Quantity Field */}
