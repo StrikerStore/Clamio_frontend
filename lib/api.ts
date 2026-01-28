@@ -62,16 +62,43 @@ function getRetryDelay(attempt: number): number {
 function isRetryableError(error: any): boolean {
   // Abort errors (timeouts)
   if (error.name === 'AbortError') return true;
-  // Network errors
+  // Network errors - these are the main "Failed to fetch" cases
   if (error.message?.includes('Failed to fetch')) return true;
   if (error.message?.includes('Network request failed')) return true;
   if (error.message?.includes('net::ERR_')) return true;
   if (error.message?.includes('NetworkError')) return true;
+  if (error.message?.includes('fetch failed')) return true;
+  if (error.message?.includes('Load failed')) return true; // Safari
   // Connection errors
   if (error.message?.includes('ECONNRESET')) return true;
+  if (error.message?.includes('ECONNREFUSED')) return true;
   if (error.message?.includes('ETIMEDOUT')) return true;
   if (error.message?.includes('ENOTFOUND')) return true;
+  if (error.message?.includes('ERR_CONNECTION')) return true;
+  // Check TypeError which sometimes wraps network errors
+  if (error.name === 'TypeError' && error.message?.includes('fetch')) return true;
   return false;
+}
+
+/**
+ * Get a user-friendly error message for network errors
+ */
+function getNetworkErrorMessage(error: any, endpoint: string): string {
+  const isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
+
+  if (!isOnline) {
+    return 'You appear to be offline. Please check your internet connection and try again.';
+  }
+
+  if (error.name === 'AbortError') {
+    return 'The request took too long. Please check your internet connection and try again.';
+  }
+
+  if (error.message?.includes('Failed to fetch') || error.message?.includes('fetch failed')) {
+    return 'Unable to connect to the server. Please check your internet connection or try again later.';
+  }
+
+  return error.message || 'An unexpected network error occurred. Please try again.';
 }
 
 /**
@@ -252,11 +279,20 @@ class ApiClient {
         if (DEBUG_API) {
           console.error('❌ API request failed:', error);
         }
+
+        // Provide user-friendly message for network errors
+        if (isRetryableError(error)) {
+          throw new Error(getNetworkErrorMessage(error, endpoint));
+        }
+
         throw error
       }
     }
 
-    // If we've exhausted all retries, throw the last error
+    // If we've exhausted all retries, throw the last error with a user-friendly message
+    if (lastError && isRetryableError(lastError)) {
+      throw new Error(getNetworkErrorMessage(lastError, endpoint));
+    }
     throw lastError || new Error('Request failed after maximum retries');
   }
 
