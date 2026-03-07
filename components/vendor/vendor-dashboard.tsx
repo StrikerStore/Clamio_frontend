@@ -44,6 +44,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { DatePicker } from "@/components/ui/date-picker"
 import { apiClient } from "@/lib/api"
 import { vendorErrorTracker } from "@/lib/vendorErrorTracker"
+import { useAsyncTask } from "@/hooks/useAsyncTask"
 
 // Mock data - Version 4
 // const mockOrders = [
@@ -204,6 +205,7 @@ export function VendorDashboard() {
   const [ordersError, setOrdersError] = useState("");
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [ordersRefreshing, setOrdersRefreshing] = useState(false);
+  const { submitTask, activeTasks } = useAsyncTask();
   // Pagination state for All Orders
   const [allOrdersPage, setAllOrdersPage] = useState(1);
   const [allOrdersHasMore, setAllOrdersHasMore] = useState(true);
@@ -2883,10 +2885,55 @@ export function VendorDashboard() {
       console.log('🔍 FRONTEND: Auth header:', authHeader ? authHeader.substring(0, 20) + '...' : 'null');
       console.log('🔍 FRONTEND: Vendor token:', vendorToken ? vendorToken.substring(0, 20) + '...' : 'null');
 
-      // Call the download label API with format parameter
-      const response = await apiClient.downloadLabel(orderId, format);
+      // Call the download label API with async:true — fires immediately, polls in background
+      const response = await apiClient.downloadLabel(orderId, format, true);
 
-      console.log('📥 FRONTEND: Download label response received');
+      // If async mode returned a taskId, polling is running via useAsyncTask hook
+      if ((response as any).async && (response as any).taskId) {
+        // Submit to the polling hook with onComplete/onError callbacks
+        await submitTask(
+          async () => response,
+          'download-label',
+          { orderId, format },
+          async (result) => {
+            // Called when polling detects completion
+            setLabelDownloadLoading(prev => ({ ...prev, [orderId]: false }));
+            if (result?.success && result?.data) {
+              const { shipping_url, awb, original_order_id, clone_order_id, formatted_pdf, format: responseFormat } = result.data;
+              const orderDisplayId = clone_order_id || original_order_id || orderId;
+              if (formatted_pdf && (responseFormat === 'a4' || responseFormat === 'four-in-one')) {
+                const binaryString = atob(formatted_pdf);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
+                const blob = new Blob([bytes], { type: 'application/pdf' });
+                const url = window.URL.createObjectURL(blob);
+                const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+                const vendorId = user?.warehouseId || 'unknown';
+                const vendorCity = vendorAddress?.city || 'unknown';
+                await downloadFile(url, `${vendorId}_${vendorCity}_${currentDate}_${responseFormat}.pdf`);
+              } else if (shipping_url) {
+                const blob = await apiClient.downloadLabelFile(shipping_url);
+                const url = window.URL.createObjectURL(blob);
+                const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+                const vendorId = user?.warehouseId || 'unknown';
+                const vendorCity = vendorAddress?.city || 'unknown';
+                await downloadFile(url, `${vendorId}_${vendorCity}_${currentDate}.pdf`);
+              }
+              toast({ title: '✅ Label Downloaded', description: `Label for order ${orderDisplayId} downloaded successfully` });
+              await refreshOrders();
+            } else {
+              toast({ title: '⚠️ Label Issue', description: result?.message || 'Label generated but could not be downloaded', className: 'bg-yellow-50 border-yellow-400 text-yellow-800' });
+            }
+          },
+          (error) => {
+            setLabelDownloadLoading(prev => ({ ...prev, [orderId]: false }));
+            toast({ title: 'Download Label Failed', description: error, variant: 'destructive' });
+          }
+        );
+        return; // Polling handles the rest
+      }
+
+      console.log('📥 FRONTEND: Download label response received (sync mode)');
       console.log('  - success:', response.success);
       console.log('  - data:', response.data);
 
@@ -3042,38 +3089,54 @@ export function VendorDashboard() {
       return
     }
 
-    // Set bulk download loading state
     setBulkDownloadLoading(true);
 
     try {
-      toast({
-        title: "Generating Labels",
-        description: `Generating labels for ${selectedOrders.length} orders...`,
-      })
+      // Use async mode: backend generates labels, returns taskId immediately
+      const initResponse = await apiClient.bulkDownloadLabels(selectedOrders, labelFormat, true, true);
 
-      console.log('🔵 FRONTEND: Starting bulk label generation process');
-      console.log('  - selected orders:', selectedOrders);
-      console.log('  - tab:', tab);
+      if (initResponse && 'taskId' in initResponse && (initResponse as any).taskId) {
+        // Poll for completion
+        await submitTask(
+          async () => initResponse as any,
+          'bulk-download-labels',
+          { orderCount: selectedOrders.length, format: labelFormat },
+          (result) => {
+            setBulkDownloadLoading(false);
+            if (result?.success && result?.data) {
+              const data = result.data;
+              setMergeDialogData({
+                successful: data.successful || [],
+                failed: data.failed || [],
+                totalSuccessful: data.total_successful || 0,
+                totalFailed: data.total_failed || 0
+              });
+              setSelectedMergeFormat(labelFormat);
+              setShowMergeDialog(true);
+            } else {
+              toast({ title: 'Label Generation Failed', description: result?.message || 'Could not generate labels', variant: 'destructive' });
+            }
+          },
+          (error) => {
+            setBulkDownloadLoading(false);
+            toast({ title: 'Label Generation Failed', description: error, variant: 'destructive' });
+          }
+        );
+        return;
+      }
 
-      // Step 1: Generate labels only (without merging)
-      const generateResponse = await apiClient.bulkDownloadLabels(selectedOrders, labelFormat, true);
-
-      console.log('📥 FRONTEND: Label generation response received');
-      console.log('  - response:', generateResponse);
-
-      // Check if response is ApiResponse (from generate_only call)
-      if (generateResponse && 'success' in generateResponse && generateResponse.success) {
-        const data = generateResponse.data;
-
-        // Show merge confirmation dialog
+      // Fallback: sync response (shouldn't happen, but handle gracefully)
+      if (initResponse && 'success' in initResponse && initResponse.success) {
+        const data = (initResponse as any).data;
         setMergeDialogData({
           successful: data.successful || [],
           failed: data.failed || [],
           totalSuccessful: data.total_successful || 0,
-          totalFailed: data.total_failed || 0
+          totalFailed: data.total_failed || 0,
         });
-        setSelectedMergeFormat(labelFormat); // Default to current label format
+        setSelectedMergeFormat(labelFormat);
         setShowMergeDialog(true);
+        setBulkDownloadLoading(false);
       } else {
         throw new Error('Invalid response from label generation');
       }
@@ -3085,8 +3148,6 @@ export function VendorDashboard() {
         description: error instanceof Error ? error.message : 'An error occurred while generating labels',
         variant: 'destructive',
       })
-    } finally {
-      // Clear bulk download loading state
       setBulkDownloadLoading(false);
     }
   }
@@ -3108,8 +3169,42 @@ export function VendorDashboard() {
       console.log('  - order_ids:', mergeDialogData.successful);
       console.log('  - format:', selectedMergeFormat);
 
-      // Step 2: Call merge endpoint with selected format
-      const blob = await apiClient.bulkDownloadLabelsMerge(mergeDialogData.successful, selectedMergeFormat);
+      // Use async mode: backend merges PDFs, returns taskId immediately
+      const initResponse = await apiClient.bulkDownloadLabelsMerge(mergeDialogData.successful, selectedMergeFormat, true);
+
+      if (initResponse && 'taskId' in (initResponse as any) && (initResponse as any).taskId) {
+        await submitTask(
+          async () => initResponse as any,
+          'bulk-download-merge',
+          { orderCount: mergeDialogData.successful.length, format: selectedMergeFormat },
+          async (result) => {
+            setMergeLoading(false);
+            if (result?.pdfBase64) {
+              // Convert base64 back to blob & download
+              const binaryString = atob(result.pdfBase64);
+              const bytes = new Uint8Array(binaryString.length);
+              for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
+              const blob = new Blob([bytes], { type: 'application/pdf' });
+              const url = window.URL.createObjectURL(blob);
+              const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+              const vendorId = user?.warehouseId || 'unknown';
+              const vendorCity = vendorAddress?.city || 'unknown';
+              await downloadFile(url, `${vendorId}_${vendorCity}_${currentDate}_${selectedMergeFormat}.pdf`);
+              toast({ title: '✅ Bulk Download Complete', description: `Downloaded labels for ${mergeDialogData!.totalSuccessful} orders` });
+            }
+            setShowMergeDialog(false);
+            setMergeDialogData(null);
+          },
+          (error) => {
+            setMergeLoading(false);
+            toast({ title: 'PDF Merge Failed', description: error, variant: 'destructive' });
+          }
+        );
+        return;
+      }
+
+      // Fallback: sync — blob was returned directly (old behavior)
+      const blob = initResponse as Blob;
 
       console.log('📥 FRONTEND: PDF merge response received');
       console.log('  - blob size:', blob.size);
@@ -3658,8 +3753,46 @@ export function VendorDashboard() {
   const handleRefreshOrders = async () => {
     setOrdersRefreshing(true);
     try {
-      const response = await apiClient.refreshOrders();
-      if (response.success) {
+      // Use async:true — backend syncs with Shipway in background, returns taskId immediately
+      const initResponse = await apiClient.refreshOrders(true);
+
+      if ((initResponse as any).async && (initResponse as any).taskId) {
+        await submitTask(
+          async () => initResponse,
+          'refresh',
+          {},
+          async () => {
+            setOrdersRefreshing(false);
+            toast({ title: '✅ Orders Refreshed', description: 'Your orders have been refreshed from Shipway.' });
+            // Re-fetch orders after sync
+            setActiveTab("all-orders");
+            setTabFilters({
+              "all-orders": { searchTerm: "", dateFrom: undefined, dateTo: undefined },
+              "my-orders": { searchTerm: "", dateFrom: undefined, dateTo: undefined },
+              "handover": { searchTerm: "", dateFrom: undefined, dateTo: undefined },
+              "order-tracking": { searchTerm: "", dateFrom: undefined, dateTo: undefined },
+            });
+            try {
+              const ordersResponse = await apiClient.getOrders();
+              if (ordersResponse.success && ordersResponse.data) setOrders(ordersResponse.data.orders || []);
+              setGroupedOrdersPage(1);
+              const gr = await apiClient.getGroupedOrders(1, 50);
+              if (gr.success && gr.data) {
+                setGroupedOrders(gr.data.groupedOrders || []);
+                if (gr.data.pagination) { setGroupedOrdersHasMore(gr.data.pagination.hasMore); setGroupedOrdersTotalCount(gr.data.pagination.total); }
+              }
+            } catch (e) { console.warn('Refresh post-fetch failed:', e); }
+          },
+          (error) => {
+            setOrdersRefreshing(false);
+            toast({ title: 'Refresh Failed', description: error, variant: 'destructive' });
+          }
+        );
+        return;
+      }
+
+      // Fallback: sync response (when async mode is not available)
+      if (initResponse.success) {
         toast({
           title: "Orders Refreshed",
           description: "Your orders have been refreshed from Shipway.",
@@ -3710,7 +3843,7 @@ export function VendorDashboard() {
       } else {
         toast({
           title: "Refresh Failed",
-          description: response.message || "Failed to refresh orders.",
+          description: initResponse.message || "Failed to refresh orders.",
           variant: "destructive",
         });
       }
