@@ -3174,6 +3174,7 @@ export function VendorDashboard() {
     }
 
     setMergeLoading(true);
+    let isAsyncTask = false; // Track if we entered the async polling path
 
     try {
       toast({
@@ -3189,12 +3190,15 @@ export function VendorDashboard() {
       const initResponse = await apiClient.bulkDownloadLabelsMerge(mergeDialogData.successful, selectedMergeFormat, true);
 
       if (initResponse && 'taskId' in (initResponse as any) && (initResponse as any).taskId) {
+        // Mark as async — finally block will NOT reset mergeLoading.
+        // The onComplete/onError callbacks will handle it when polling completes.
+        isAsyncTask = true;
+
         await submitTask(
           async () => initResponse as any,
           'bulk-download-merge',
           { orderCount: mergeDialogData.successful.length, format: selectedMergeFormat },
           async (result) => {
-            setMergeLoading(false);
             if (result?.pdfBase64) {
               // Convert base64 back to blob & download
               const binaryString = atob(result.pdfBase64);
@@ -3207,7 +3211,11 @@ export function VendorDashboard() {
               const vendorCity = vendorAddress?.city || 'unknown';
               await downloadFile(url, `${vendorId}_${vendorCity}_${currentDate}_${selectedMergeFormat}.pdf`);
               toast({ title: '✅ Bulk Download Complete', description: `Downloaded labels for ${mergeDialogData!.totalSuccessful} orders` });
+            } else {
+              toast({ title: '⚠️ Merge Issue', description: 'Labels merged but PDF data was empty', className: 'bg-yellow-50 border-yellow-400 text-yellow-800' });
             }
+            // Only now clear the loading + close dialog
+            setMergeLoading(false);
             setShowMergeDialog(false);
             setMergeDialogData(null);
           },
@@ -3216,6 +3224,7 @@ export function VendorDashboard() {
             toast({ title: 'PDF Merge Failed', description: error, variant: 'destructive' });
           }
         );
+        // Don't fall through to finally — mergeLoading is managed by callbacks above
         return;
       }
 
@@ -3291,7 +3300,12 @@ export function VendorDashboard() {
         variant: 'destructive',
       })
     } finally {
-      setMergeLoading(false);
+      // Only reset mergeLoading for sync path and error cases.
+      // For async tasks, the onComplete/onError callbacks manage mergeLoading.
+      // NOTE: finally ALWAYS runs in JS, even after return — hence the flag check.
+      if (!isAsyncTask) {
+        setMergeLoading(false);
+      }
     }
   }
 
@@ -6274,6 +6288,27 @@ export function VendorDashboard() {
             </div>
           </div>
 
+          {/* Progress indicator during merge */}
+          {mergeLoading && (
+            <div className="py-4">
+              <div className="flex flex-col items-center gap-3 p-4 rounded-lg bg-blue-50 border border-blue-200">
+                <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+                <div className="text-center">
+                  <p className="text-sm font-semibold text-blue-800">
+                    Merging labels into PDF...
+                  </p>
+                  <p className="text-xs text-blue-600 mt-1">
+                    This may take a moment. Please don&apos;t close this dialog.
+                  </p>
+                </div>
+                {/* Animated progress bar */}
+                <div className="w-full bg-blue-200 rounded-full h-1.5 overflow-hidden">
+                  <div className="bg-blue-600 h-1.5 rounded-full animate-pulse" style={{ width: '100%' }} />
+                </div>
+              </div>
+            </div>
+          )}
+
           <DialogFooter className={isMobile ? 'flex-col gap-2' : ''}>
             <Button
               variant="outline"
@@ -6295,7 +6330,7 @@ export function VendorDashboard() {
               {mergeLoading ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Merging...
+                  Merging & Preparing Download...
                 </>
               ) : (
                 <>
