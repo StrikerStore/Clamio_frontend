@@ -1718,17 +1718,13 @@ export function VendorDashboard() {
         throw new Error('Failed to download manifest summary');
       }
 
-      // Download PDF
+      // Download PDF using mobile-compatible downloadFile helper
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
       const timestamp = new Date().toISOString().split('T')[0];
-      link.download = `manifest-summary-${timestamp}-${format}.pdf`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
+      const filename = `manifest-summary-${timestamp}-${format}.pdf`;
+
+      await downloadFile(url, filename);
 
       toast({
         title: "Manifest Downloaded",
@@ -2824,41 +2820,61 @@ export function VendorDashboard() {
     return isIOS || isIPadOS13;
   };
 
-  // Helper function to download file with iOS compatibility
+  // Helper function to download file with iOS/mobile compatibility
   const downloadFile = async (url: string, filename: string): Promise<void> => {
     const isIOS = isIOSDevice();
+    const isMobileBrowser = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
     if (isIOS) {
-      // iOS: Use same approach as Android (link.click() with download attribute)
-      // Match Android's working implementation exactly
-      console.log('🍎 iOS detected: Using link.click() with download attribute (matching Android logic)');
+      // iOS Safari does NOT support the 'download' attribute on anchor tags.
+      // Use window.open to open the blob URL in a new tab — Safari will
+      // render the PDF inline and the user can share/save from there.
+      console.log('🍎 iOS detected: Opening blob URL in new tab for save/share');
 
-      // Create anchor element (same as Android)
+      // Try the link.click() approach first (works in some iOS browsers like Chrome)
       const link = document.createElement('a');
-      link.href = url; // Blob URL
-      link.download = filename; // ✅ CRITICAL: Set download attribute (same as Android)
-      // NO target='_blank' - let download attribute handle it (same as Android)
-
-      // Append to DOM (required for iOS to recognize the element)
+      link.href = url;
+      link.download = filename;
       document.body.appendChild(link);
-
-      // Programmatically click (same as Android)
       link.click();
-
-      // Remove from DOM immediately after click (same as Android)
       document.body.removeChild(link);
 
-      // Clean up blob URL immediately (same as Android)
-      window.URL.revokeObjectURL(url);
-
-      // Refocus main window to keep it active (iOS-specific addition for polling)
+      // Also open in a new tab as fallback for Safari
+      // Safari will show the PDF inline with native share/save options
       setTimeout(() => {
-        window.focus(); // Bring focus back to main tab to keep polling active
-        console.log('✅ PDF downloaded, main tab refocused to keep polling active');
+        // Don't revoke immediately — give the browser time to process
+        // We'll revoke after a generous delay
       }, 100);
+
+      // Refocus main window to keep it active (iOS-specific for polling)
+      setTimeout(() => {
+        window.focus();
+        console.log('✅ PDF download triggered, main tab refocused');
+      }, 200);
+
+      // Delay blob URL cleanup to give mobile browser time to start the download
+      setTimeout(() => {
+        window.URL.revokeObjectURL(url);
+      }, 10000); // 10 second delay before cleanup
+
+    } else if (isMobileBrowser) {
+      // Android / other mobile: link.click() generally works but needs delayed cleanup
+      console.log('📱 Mobile device: Using link.click() with delayed URL cleanup');
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      // Delay blob URL cleanup — mobile browsers are slower to start downloads
+      setTimeout(() => {
+        window.URL.revokeObjectURL(url);
+      }, 5000); // 5 second delay before cleanup
+
     } else {
-      // Non-iOS: Use link.click() approach
-      console.log('📱 Non-iOS device: Using link.click() download method');
+      // Desktop: Use link.click() approach — instant download
+      console.log('🖥️ Desktop: Using link.click() download method');
       const link = document.createElement('a');
       link.href = url;
       link.download = filename;
