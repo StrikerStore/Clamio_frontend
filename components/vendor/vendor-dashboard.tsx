@@ -503,6 +503,43 @@ export function VendorDashboard() {
       setDashboardStatsLoading(false);
     }
   }
+  // Optimistically update groupedOrders state to mark an order as label_downloaded = 1
+  // This gives instant UI feedback (green row, Ready button enabled) without waiting for API refresh.
+  // Uses state setter functions which are stable references — safe to call from async polling callbacks.
+  const optimisticallyMarkLabelDownloaded = (orderId: string) => {
+    console.log(`🟢 Optimistically marking order ${orderId} as label_downloaded = 1`);
+    setGroupedOrders(prev => prev.map(order =>
+      order.order_id === orderId
+        ? { ...order, label_downloaded: 1 }
+        : order
+    ));
+    // Also update the allGroupedOrders cache if it exists
+    setAllGroupedOrders(prev => prev.map(order =>
+      order.order_id === orderId
+        ? { ...order, label_downloaded: 1 }
+        : order
+    ));
+    // Update the tab data cache
+    setTabDataCache(prev => {
+      if (!prev['my-orders']) return prev;
+      return {
+        ...prev,
+        'my-orders': {
+          ...prev['my-orders'],
+          groupedOrders: prev['my-orders'].groupedOrders.map((order: any) =>
+            order.order_id === orderId
+              ? { ...order, label_downloaded: 1 }
+              : order
+          ),
+          allGroupedOrders: (prev['my-orders'].allGroupedOrders || []).map((order: any) =>
+            order.order_id === orderId
+              ? { ...order, label_downloaded: 1 }
+              : order
+          ),
+        }
+      };
+    });
+  };
 
   // Reusable function to refresh orders data
   const refreshOrders = async () => {
@@ -2936,7 +2973,10 @@ export function VendorDashboard() {
                 await downloadFile(url, `${vendorId}_${vendorCity}_${currentDate}.pdf`);
               }
               toast({ title: '✅ Label Downloaded', description: `Label for order ${orderDisplayId} downloaded successfully` });
-              await refreshOrders();
+              // Optimistically update UI immediately (stable state setter, no stale closure issue)
+              optimisticallyMarkLabelDownloaded(orderId);
+              // Also refresh from API in background for full consistency
+              try { await refreshOrders(); } catch (e) { console.log('⚠️ Background refresh failed, but optimistic update is applied'); }
             } else {
               toast({ title: '⚠️ Label Issue', description: result?.message || 'Label generated but could not be downloaded', className: 'bg-yellow-50 border-yellow-400 text-yellow-800' });
             }
@@ -2997,8 +3037,9 @@ export function VendorDashboard() {
               description: `${responseFormat} label for order ${orderDisplayId} downloaded successfully`,
             });
 
-            // Refresh orders to update the UI (works immediately on iOS with iframe approach)
-            await refreshOrders();
+            // Optimistically update UI immediately, then refresh from API
+            optimisticallyMarkLabelDownloaded(orderId);
+            try { await refreshOrders(); } catch (e) { console.log('⚠️ Background refresh failed, but optimistic update is applied'); }
 
           } catch (pdfError) {
             console.error('❌ FRONTEND: Formatted PDF download failed:', pdfError);
@@ -3037,8 +3078,9 @@ export function VendorDashboard() {
               description: `${format} label for order ${orderDisplayId} downloaded successfully`,
             });
 
-            // Refresh orders to update the UI (works immediately on iOS with iframe approach)
-            await refreshOrders();
+            // Optimistically update UI immediately, then refresh from API
+            optimisticallyMarkLabelDownloaded(orderId);
+            try { await refreshOrders(); } catch (e) { console.log('⚠️ Background refresh failed, but optimistic update is applied'); }
 
           } catch (downloadError) {
             console.error('❌ FRONTEND: Label file download failed:', downloadError);
@@ -3218,6 +3260,12 @@ export function VendorDashboard() {
             setMergeLoading(false);
             setShowMergeDialog(false);
             setMergeDialogData(null);
+            // Optimistically mark all successful orders as label_downloaded
+            if (mergeDialogData?.successful) {
+              mergeDialogData.successful.forEach(oid => optimisticallyMarkLabelDownloaded(oid));
+            }
+            // Background refresh for full consistency
+            try { await refreshOrders(); } catch (e) { console.log('⚠️ Background refresh after merge failed, but optimistic update is applied'); }
           },
           (error) => {
             setMergeLoading(false);
@@ -3266,6 +3314,9 @@ export function VendorDashboard() {
       // Close dialog
       setShowMergeDialog(false);
       setMergeDialogData(null);
+
+      // Optimistically mark all successful orders as label_downloaded
+      mergeDialogData.successful.forEach(oid => optimisticallyMarkLabelDownloaded(oid));
 
       // OPTIMIZATION: Only refresh "My Orders" tab with pagination (fast) instead of all orders (slow)
       console.log('🔄 FRONTEND: Refreshing grouped orders for My Orders tab...');
