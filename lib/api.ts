@@ -218,8 +218,14 @@ class ApiClient {
               status: response.status,
               statusText: response.statusText,
               endpoint: endpoint,
-              data: data || 'No data received'
+              data: data || 'No data received',
+              url: `${API_BASE_URL}${endpoint}`
             })
+            
+            // If data exists but is empty object, log the raw response
+            if (data && typeof data === 'object' && Object.keys(data).length === 0) {
+              console.error('⚠️ Empty error response received. This might indicate a server-side error.');
+            }
           }
 
           // Log detailed validation errors for debugging
@@ -272,8 +278,19 @@ class ApiClient {
             endpoint,
             timeout: `${NETWORK_CONFIG.REQUEST_TIMEOUT_MS / 1000}s`,
             attempts: attempt + 1,
+            apiBaseUrl: API_BASE_URL,
           });
-          throw new Error('Request timed out. Please check your internet connection and try again.');
+          
+          // Check if backend is reachable
+          const isConnectionError = error.message?.includes('Failed to fetch') || 
+                                    error.message?.includes('NetworkError') ||
+                                    error.message?.includes('ECONNREFUSED');
+          
+          if (isConnectionError) {
+            throw new Error(`Cannot connect to backend server at ${API_BASE_URL}. Please ensure the backend server is running on port 5000.`);
+          }
+          
+          throw new Error('Request timed out. The server may be slow or overloaded. Please try again.');
         }
 
         if (DEBUG_API) {
@@ -1270,11 +1287,16 @@ class ApiClient {
     vendor_wh_id: string;
     account_code: string;
     return_warehouse_id?: string;
+    pickup_location?: string;
   }): Promise<ApiResponse> {
     return this.makeRequest('/warehouse-mapping', {
       method: 'POST',
       body: JSON.stringify(mappingData)
     });
+  }
+
+  async getShiprocketPickupLocations(accountCode: string): Promise<ApiResponse> {
+    return this.makeRequest(`/warehouse-mapping/shiprocket-pickups/${accountCode}`);
   }
 
   async deleteWhMapping(id: number): Promise<ApiResponse> {
@@ -1288,6 +1310,16 @@ class ApiClient {
     password: string
   }): Promise<ApiResponse> {
     return this.makeRequest('/stores/test-shipway', {
+      method: 'POST',
+      body: JSON.stringify(credentials)
+    })
+  }
+
+  async testStoreShiprocketConnection(credentials: {
+    username: string
+    password: string
+  }): Promise<ApiResponse> {
+    return this.makeRequest('/stores/test-shiprocket', {
       method: 'POST',
       body: JSON.stringify(credentials)
     })
@@ -1310,8 +1342,9 @@ class ApiClient {
 
     console.log('🔍 DOWNLOAD LABEL API CLIENT DEBUG:');
     console.log('  - Order ID being sent:', orderId);
+    console.log('  - Order ID type:', typeof orderId);
     console.log('  - Format being sent:', format);
-    console.log('  - Async mode:', runAsync);
+    console.log('  - runAsync:', runAsync);
     console.log('  - Vendor token:', vendorToken ? vendorToken.substring(0, 20) + '...' : 'null');
 
     const config: RequestInit = {
@@ -1323,12 +1356,15 @@ class ApiClient {
       body: JSON.stringify({ order_id: orderId, format: format, async: runAsync })
     }
 
+    console.log('  - Request body:', JSON.stringify({ order_id: orderId, format: format, async: runAsync }));
+
     try {
       const response = await fetch(`${API_BASE_URL}/orders/download-label`, config)
       const data = await response.json()
 
       console.log('🔍 DOWNLOAD LABEL API RESPONSE DEBUG:');
       console.log('  - Status:', response.status);
+      console.log('  - OK:', response.ok);
       console.log('  - Data:', data);
 
       if (!response.ok) {
@@ -1347,8 +1383,12 @@ class ApiClient {
     const vendorToken = typeof window !== 'undefined' ? localStorage.getItem('vendorToken') : null;
 
     console.log('🔍 BULK DOWNLOAD LABELS API CLIENT DEBUG:');
+    console.log('  - Order IDs being sent:', orderIds);
     console.log('  - Order IDs count:', orderIds.length);
-    console.log('  - Format:', format, '| Generate only:', generateOnly, '| Async:', runAsync);
+    console.log('  - Format being sent:', format);
+    console.log('  - Generate only:', generateOnly);
+    console.log('  - runAsync:', runAsync);
+    console.log('  - Vendor token:', vendorToken ? vendorToken.substring(0, 20) + '...' : 'null');
 
     const config: RequestInit = {
       method: 'POST',
@@ -1359,15 +1399,22 @@ class ApiClient {
       body: JSON.stringify({ order_ids: orderIds, format: format, generate_only: generateOnly, async: runAsync })
     }
 
+    console.log('  - Request body:', JSON.stringify({ order_ids: orderIds, format: format, generate_only: generateOnly, async: runAsync }));
+
     try {
       const response = await fetch(`${API_BASE_URL}/orders/bulk-download-labels`, config)
+
+      console.log('🔍 BULK DOWNLOAD LABELS API RESPONSE DEBUG:');
+      console.log('  - Status:', response.status);
+      console.log('  - OK:', response.ok);
+      console.log('  - Content-Type:', response.headers.get('content-type'));
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.message || `HTTP error! status: ${response.status}`)
       }
 
-      // Async mode: backend returned taskId
+      // runAsync=true always returns JSON {taskId}
       if (runAsync) {
         const data = await response.json();
         return data as ApiResponse;
@@ -1377,20 +1424,31 @@ class ApiClient {
       if (generateOnly) {
         const data = await response.json();
         console.log('✅ Bulk labels generated successfully (generate_only=true)');
+        console.log('  - Response data:', data);
         return data as ApiResponse;
       }
 
       // Get the blob from the response
       const blob = await response.blob()
-      console.log('✅ Bulk labels PDF downloaded successfully:', blob.size, 'bytes');
+      console.log('✅ Bulk labels PDF downloaded successfully');
+      console.log('  - Blob size:', blob.size, 'bytes');
 
-      // Check for warning headers
+      // Check for warning headers and store them in blob object
       const warningsHeader = response.headers.get('X-Download-Warnings');
       const failedOrdersHeader = response.headers.get('X-Failed-Orders');
+
       if (warningsHeader) {
-        (blob as any)._warnings = atob(warningsHeader);
-        (blob as any)._failedOrders = failedOrdersHeader ? JSON.parse(failedOrdersHeader) : [];
+        console.log('⚠️ Some orders failed during bulk download');
+        const warnings = atob(warningsHeader);
+        const failedOrders = failedOrdersHeader ? JSON.parse(failedOrdersHeader) : [];
+        console.log('  - Warnings:', warnings);
+        console.log('  - Failed orders:', failedOrders);
+
+        // Store warnings in blob object for later access
+        (blob as any)._warnings = warnings;
+        (blob as any)._failedOrders = failedOrders;
       }
+      console.log('  - Blob type:', blob.type);
 
       return blob
     } catch (error) {
@@ -1404,7 +1462,11 @@ class ApiClient {
     const vendorToken = typeof window !== 'undefined' ? localStorage.getItem('vendorToken') : null;
 
     console.log('🔍 BULK DOWNLOAD LABELS MERGE API CLIENT DEBUG:');
-    console.log('  - Order IDs count:', orderIds.length, '| Format:', format, '| Async:', runAsync);
+    console.log('  - Order IDs being sent:', orderIds);
+    console.log('  - Order IDs count:', orderIds.length);
+    console.log('  - Format being sent:', format);
+    console.log('  - runAsync:', runAsync);
+    console.log('  - Vendor token:', vendorToken ? vendorToken.substring(0, 20) + '...' : 'null');
 
     const config: RequestInit = {
       method: 'POST',
@@ -1415,15 +1477,22 @@ class ApiClient {
       body: JSON.stringify({ order_ids: orderIds, format: format, async: runAsync })
     }
 
+    console.log('  - Request body:', JSON.stringify({ order_ids: orderIds, format: format, async: runAsync }));
+
     try {
       const response = await fetch(`${API_BASE_URL}/orders/bulk-download-labels-merge`, config)
+
+      console.log('🔍 BULK DOWNLOAD LABELS MERGE API RESPONSE DEBUG:');
+      console.log('  - Status:', response.status);
+      console.log('  - OK:', response.ok);
+      console.log('  - Content-Type:', response.headers.get('content-type'));
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.message || `HTTP error! status: ${response.status}`)
       }
 
-      // Async mode: backend returned taskId
+      // runAsync returns JSON {taskId}
       if (runAsync) {
         const data = await response.json();
         return data as ApiResponse;
@@ -1431,7 +1500,10 @@ class ApiClient {
 
       // Get the blob from the response
       const blob = await response.blob()
-      console.log('✅ Bulk labels PDF merged and downloaded successfully', blob.size, 'bytes');
+      console.log('✅ Bulk labels PDF merged and downloaded successfully');
+      console.log('  - Blob size:', blob.size, 'bytes');
+      console.log('  - Blob type:', blob.type);
+
       return blob
     } catch (error) {
       console.error('Bulk download labels merge API request failed:', error)
@@ -1798,6 +1870,41 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify(data)
     })
+  }
+
+  /**
+   * Health check - verify backend server is running and reachable
+   */
+  async checkBackendHealth(): Promise<{ success: boolean; message: string; database?: string }> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/public/health`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        signal: AbortSignal.timeout(5000), // 5 second timeout for health check
+      });
+
+      if (!response.ok) {
+        return {
+          success: false,
+          message: `Backend server responded with status ${response.status}`,
+        };
+      }
+
+      const data = await response.json();
+      return {
+        success: data.success === true,
+        message: data.message || 'Backend is running',
+        database: data.database,
+      };
+    } catch (error: any) {
+      console.error('❌ Backend health check failed:', error.message);
+      return {
+        success: false,
+        message: `Cannot connect to backend server at ${API_BASE_URL}. Please ensure the backend is running on port 5000.`,
+      };
+    }
   }
 }
 

@@ -154,6 +154,35 @@ export function VendorDashboard() {
   const { user, logout } = useAuth()
   const { toast } = useToast()
   const { isMobile, isTablet, isDesktop, deviceType } = useDeviceType()
+  const { registerTask } = useAsyncTask({
+    onComplete: (taskId, result) => {
+      // Global fallback for tasks whose specific callback was not set (e.g. recovered from localStorage on re-open)
+      if (result?.pdfBase64) {
+        try {
+          const binaryString = atob(result.pdfBase64);
+          const bytes = new Uint8Array(binaryString.length);
+          for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
+          const blob = new Blob([bytes], { type: result.contentType || 'application/pdf' });
+          const url = window.URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `label_${new Date().toISOString().slice(0, 10)}.pdf`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          window.URL.revokeObjectURL(url);
+          toast({ title: 'Download Ready', description: 'Your background task file has been downloaded.' });
+        } catch {
+          toast({ title: 'Download Failed', description: 'Could not decode the background task file.', variant: 'destructive' });
+        }
+      } else if (result?.success) {
+        toast({ title: 'Operation Complete', description: result.message || 'Your background task completed successfully.' });
+      }
+    },
+    onError: (taskId, error) => {
+      toast({ title: 'Background Task Failed', description: error || 'An error occurred.', variant: 'destructive' });
+    }
+  });
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [activeTab, setActiveTab] = useState("all-orders")
 
@@ -205,7 +234,6 @@ export function VendorDashboard() {
   const [ordersError, setOrdersError] = useState("");
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [ordersRefreshing, setOrdersRefreshing] = useState(false);
-  const { submitTask, activeTasks } = useAsyncTask();
   // Pagination state for All Orders
   const [allOrdersPage, setAllOrdersPage] = useState(1);
   const [allOrdersHasMore, setAllOrdersHasMore] = useState(true);
@@ -269,7 +297,13 @@ export function VendorDashboard() {
   const [labelDownloadLoading, setLabelDownloadLoading] = useState<{ [key: string]: boolean }>({})
   const [bulkDownloadLoading, setBulkDownloadLoading] = useState(false)
 
-  // Merge confirmation dialog state
+  // Unified label download dialog state (format-first, works for both Shipway + Shiprocket)
+  const [showFormatDialog, setShowFormatDialog] = useState(false)
+  const [pendingDownloadOrderIds, setPendingDownloadOrderIds] = useState<string[]>([])
+  const [selectedDownloadFormat, setSelectedDownloadFormat] = useState<string>("thermal")
+  const [downloadProcessing, setDownloadProcessing] = useState(false)
+
+  // Merge confirmation dialog state (kept for backward compat - used after generation)
   const [showMergeDialog, setShowMergeDialog] = useState(false)
   const [mergeDialogData, setMergeDialogData] = useState<{
     successful: string[]
@@ -284,6 +318,9 @@ export function VendorDashboard() {
   const [showManifestDialog, setShowManifestDialog] = useState(false)
   const [manifestDialogData, setManifestDialogData] = useState<string[] | null>(null)
   const [selectedManifestFormat, setSelectedManifestFormat] = useState<string>("a4")
+  const [isShiprocketManifest, setIsShiprocketManifest] = useState(false)
+  const [shiprocketOrderIds, setShiprocketOrderIds] = useState<string[]>([])
+  const [shiprocketManifestLoading, setShiprocketManifestLoading] = useState(false)
 
   // Loading states for reverse operations
   const [reverseLoading, setReverseLoading] = useState<{ [key: string]: boolean }>({})
@@ -503,43 +540,6 @@ export function VendorDashboard() {
       setDashboardStatsLoading(false);
     }
   }
-  // Optimistically update groupedOrders state to mark an order as label_downloaded = 1
-  // This gives instant UI feedback (green row, Ready button enabled) without waiting for API refresh.
-  // Uses state setter functions which are stable references — safe to call from async polling callbacks.
-  const optimisticallyMarkLabelDownloaded = (orderId: string) => {
-    console.log(`🟢 Optimistically marking order ${orderId} as label_downloaded = 1`);
-    setGroupedOrders(prev => prev.map(order =>
-      order.order_id === orderId
-        ? { ...order, label_downloaded: 1 }
-        : order
-    ));
-    // Also update the allGroupedOrders cache if it exists
-    setAllGroupedOrders(prev => prev.map(order =>
-      order.order_id === orderId
-        ? { ...order, label_downloaded: 1 }
-        : order
-    ));
-    // Update the tab data cache
-    setTabDataCache(prev => {
-      if (!prev['my-orders']) return prev;
-      return {
-        ...prev,
-        'my-orders': {
-          ...prev['my-orders'],
-          groupedOrders: prev['my-orders'].groupedOrders.map((order: any) =>
-            order.order_id === orderId
-              ? { ...order, label_downloaded: 1 }
-              : order
-          ),
-          allGroupedOrders: (prev['my-orders'].allGroupedOrders || []).map((order: any) =>
-            order.order_id === orderId
-              ? { ...order, label_downloaded: 1 }
-              : order
-          ),
-        }
-      };
-    });
-  };
 
   // Reusable function to refresh orders data
   const refreshOrders = async () => {
@@ -1755,13 +1755,17 @@ export function VendorDashboard() {
         throw new Error('Failed to download manifest summary');
       }
 
-      // Download PDF using mobile-compatible downloadFile helper
+      // Download PDF
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
       const timestamp = new Date().toISOString().split('T')[0];
-      const filename = `manifest-summary-${timestamp}-${format}.pdf`;
-
-      await downloadFile(url, filename);
+      link.download = `manifest-summary-${timestamp}-${format}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
 
       toast({
         title: "Manifest Downloaded",
@@ -1779,6 +1783,104 @@ export function VendorDashboard() {
     }
   };
 
+  const handleShiprocketManifestGeneration = async (orderIds: string[], format: string = 'a4', shipwayManifestIds: string[] | null = null) => {
+    try {
+      setShiprocketManifestLoading(true);
+
+      const vendorToken = localStorage.getItem('vendorToken');
+      if (!vendorToken) {
+        toast({
+          title: "Authentication Error",
+          description: "Vendor token not found. Please login again.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+      console.log(`🚀 Calling Shiprocket Generate Manifest API for ${orderIds.length} orders with format: ${format}`);
+
+      const response = await fetch(`${API_BASE_URL}/orders/shiprocket/generate-manifest`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': vendorToken,
+        },
+        body: JSON.stringify({ order_ids: orderIds, format: format }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        toast({
+          title: "Manifest Generated",
+          description: `Successfully generated manifest for ${data.data.successful_orders?.length || 0} order(s)`,
+        });
+
+        // Show details if some orders failed
+        if (data.data.failed_orders && data.data.failed_orders.length > 0) {
+          toast({
+            title: "Some Orders Failed",
+            description: `${data.data.failed_orders.length} orders could not be manifested. Check console for details.`,
+            variant: "destructive",
+          });
+          console.log('Failed orders:', data.data.failed_orders);
+        }
+
+        // Download manifest PDF if manifest IDs were generated
+        // If we have Shipway manifest IDs stored, combine them with Shiprocket manifest IDs
+        if (data.data.manifest_ids && data.data.manifest_ids.length > 0) {
+          const shiprocketManifestIds = data.data.manifest_ids;
+          const shipwayIds = shipwayManifestIds && Array.isArray(shipwayManifestIds) ? shipwayManifestIds : [];
+          
+          // Combine all manifest IDs (Shipway + Shiprocket) for single PDF download
+          const allManifestIds = [...shipwayIds, ...shiprocketManifestIds];
+          
+          if (allManifestIds.length > 0) {
+            console.log('📥 Downloading combined manifest summary:');
+            console.log('  - Shipway manifest IDs:', shipwayIds.length);
+            console.log('  - Shiprocket manifest IDs:', shiprocketManifestIds.length);
+            console.log('  - Total manifest IDs:', allManifestIds.length);
+            await downloadManifestSummary(allManifestIds, format);
+          }
+        }
+
+        // Clear selection and refresh orders
+        setSelectedMyOrders([]);
+
+        // Highlight Handover tab to show the change
+        highlightTab("handover");
+
+        fetchGroupedOrders();
+        fetchHandoverOrders();
+
+        // Refresh dashboard stats
+        console.log('🔄 FRONTEND: Refreshing dashboard stats after Shiprocket manifest generation...');
+        try {
+          await fetchDashboardStats();
+          console.log('✅ FRONTEND: Dashboard stats refreshed successfully');
+        } catch (statsError) {
+          console.log('⚠️ FRONTEND: Failed to refresh dashboard stats, but manifest generation was successful');
+        }
+      } else {
+        toast({
+          title: "Manifest Generation Failed",
+          description: data.message || "Failed to generate manifest for orders",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error('Error generating Shiprocket manifest:', error);
+      toast({
+        title: "Error",
+        description: "Network error occurred while generating manifest",
+        variant: "destructive",
+      });
+    } finally {
+      setShiprocketManifestLoading(false);
+    }
+  };
+
   const handleBulkManifestDownload = async () => {
     if (selectedHandoverOrders.length === 0) {
       toast({
@@ -1793,34 +1895,68 @@ export function VendorDashboard() {
       // Get filtered orders for handover tab
       const handoverOrders = getFilteredHandoverOrders();
 
-      // Extract unique manifest_ids from selected orders
-      const uniqueManifestIds = new Set<string>();
+      // Separate orders by shipping partner
+      const shipwayOrders: string[] = [];
+      const shiprocketOrders: string[] = [];
+      const shipwayManifestIds = new Set<string>();
 
       selectedHandoverOrders.forEach(orderId => {
         const order = handoverOrders.find((o: any) => o.order_id === orderId);
-        if (order && order.manifest_id) {
-          uniqueManifestIds.add(order.manifest_id);
+        if (!order) return;
+
+        const shippingPartner = (order.shipping_partner || 'shipway').toLowerCase();
+        
+        if (shippingPartner === 'shiprocket') {
+          shiprocketOrders.push(orderId);
+        } else {
+          // Shipway or other providers
+          shipwayOrders.push(orderId);
+          if (order.manifest_id) {
+            shipwayManifestIds.add(order.manifest_id);
+          }
         }
       });
 
-      const manifestIdsArray = Array.from(uniqueManifestIds);
+      console.log('📥 Bulk manifest download analysis:');
+      console.log('  - Shipway orders:', shipwayOrders.length, 'with', shipwayManifestIds.size, 'manifest IDs');
+      console.log('  - Shiprocket orders:', shiprocketOrders.length);
 
-      if (manifestIdsArray.length === 0) {
+      // If we have both types, we need to handle them separately
+      if (shiprocketOrders.length > 0 && shipwayManifestIds.size > 0) {
+        // We have both Shiprocket and Shipway orders
+        // First, generate manifests for Shiprocket orders, then download all together
+        console.log('📥 Mixed providers detected - will generate Shiprocket manifests first');
+        
+        // Set up for Shiprocket manifest generation
+        setShiprocketOrderIds(shiprocketOrders);
+        setIsShiprocketManifest(true);
+        // Store Shipway manifest IDs to download after Shiprocket generation
+        setManifestDialogData(Array.from(shipwayManifestIds));
+        setShowManifestDialog(true);
+      } else if (shiprocketOrders.length > 0) {
+        // Only Shiprocket orders - need to generate manifests
+        console.log('📥 Only Shiprocket orders - opening generation dialog');
+        setShiprocketOrderIds(shiprocketOrders);
+        setIsShiprocketManifest(true);
+        setManifestDialogData(null);
+        setShowManifestDialog(true);
+      } else if (shipwayManifestIds.size > 0) {
+        // Only Shipway orders - can download directly
+        console.log('📥 Only Shipway orders - opening download dialog');
+        const manifestIdsArray = Array.from(shipwayManifestIds);
+        setManifestDialogData(manifestIdsArray);
+        setIsShiprocketManifest(false);
+        setShowManifestDialog(true);
+      } else {
         toast({
           title: "No Manifest IDs Found",
-          description: "Selected orders do not have manifest IDs",
+          description: "Selected orders do not have manifest IDs. Please ensure orders are manifested first.",
           variant: "destructive",
         });
         return;
       }
 
-      console.log('📥 Opening manifest format dialog:', manifestIdsArray);
-
-      // Open dialog instead of direct download
-      setManifestDialogData(manifestIdsArray);
-      setShowManifestDialog(true);
-
-      // Clear selection after successful download
+      // Clear selection after opening dialog
       setSelectedHandoverOrders([]);
 
     } catch (error) {
@@ -1867,6 +2003,45 @@ export function VendorDashboard() {
 
       const data = await response.json();
 
+      // Check if orders require format selection (for manifest generation)
+      if (data.requires_format && data.order_ids_requiring_format && data.order_ids_requiring_format.length > 0) {
+        console.log('🔵 Orders requiring format selection detected, showing format dialog...');
+        setShiprocketOrderIds(data.order_ids_requiring_format);
+        setIsShiprocketManifest(true);
+        setShowManifestDialog(true);
+        setSelectedManifestFormat("a4"); // Reset to default
+        
+        // Store Shipway manifest IDs if they were created (so they can be combined with Shiprocket manifests)
+        if (data.data?.manifest_ids && data.data.manifest_ids.length > 0) {
+          console.log('📦 Storing Shipway manifest IDs for later combination:', data.data.manifest_ids);
+          setManifestDialogData(data.data.manifest_ids);
+        }
+        
+        // If Shipway orders were already processed, refresh orders and show success
+        if (data.data?.shipway_processed && data.data.successful_orders?.length > 0) {
+          // Refresh orders to show updated status
+          fetchGroupedOrders();
+          fetchHandoverOrders();
+          fetchDashboardStats();
+          
+          toast({
+            title: "Orders Processed",
+            description: `${data.data.successful_orders.length} order(s) already processed successfully`,
+          });
+        }
+        
+        // Show info toast for format selection
+        const formatCount = data.order_ids_requiring_format.length;
+        toast({
+          title: "Select Manifest Format",
+          description: `Please select a format for ${formatCount} order(s)`,
+        });
+        
+        // Don't clear selection yet - wait for format confirmation
+        setBulkMarkReadyLoading(false);
+        return;
+      }
+
       if (data.success) {
         toast({
           title: "Orders Marked Ready",
@@ -1883,10 +2058,11 @@ export function VendorDashboard() {
           console.log('Failed orders:', data.data.failed_orders);
         }
 
-        // Auto-download manifest summary PDF
+        // Auto-download manifest summary PDF (for Shipway orders)
         if (data.data.manifest_ids && data.data.manifest_ids.length > 0) {
           console.log('📥 Opening manifest format dialog after bulk mark ready...');
           setManifestDialogData(data.data.manifest_ids);
+          setIsShiprocketManifest(false);
           setShowManifestDialog(true);
         }
 
@@ -2257,6 +2433,8 @@ export function VendorDashboard() {
               is_handover: order.is_handover,
               is_manifest: order.is_manifest,
               manifest_id: order.manifest_id,
+              account_code: order.account_code, // Add account_code
+              shipping_partner: order.shipping_partner || 'shipway', // Add shipping_partner
               total_quantity: 0,
               products: []
             };
@@ -2857,61 +3035,41 @@ export function VendorDashboard() {
     return isIOS || isIPadOS13;
   };
 
-  // Helper function to download file with iOS/mobile compatibility
+  // Helper function to download file with iOS compatibility
   const downloadFile = async (url: string, filename: string): Promise<void> => {
     const isIOS = isIOSDevice();
-    const isMobileBrowser = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
     if (isIOS) {
-      // iOS Safari does NOT support the 'download' attribute on anchor tags.
-      // Use window.open to open the blob URL in a new tab — Safari will
-      // render the PDF inline and the user can share/save from there.
-      console.log('🍎 iOS detected: Opening blob URL in new tab for save/share');
+      // iOS: Use same approach as Android (link.click() with download attribute)
+      // Match Android's working implementation exactly
+      console.log('🍎 iOS detected: Using link.click() with download attribute (matching Android logic)');
 
-      // Try the link.click() approach first (works in some iOS browsers like Chrome)
+      // Create anchor element (same as Android)
       const link = document.createElement('a');
-      link.href = url;
-      link.download = filename;
+      link.href = url; // Blob URL
+      link.download = filename; // ✅ CRITICAL: Set download attribute (same as Android)
+      // NO target='_blank' - let download attribute handle it (same as Android)
+
+      // Append to DOM (required for iOS to recognize the element)
       document.body.appendChild(link);
+
+      // Programmatically click (same as Android)
       link.click();
+
+      // Remove from DOM immediately after click (same as Android)
       document.body.removeChild(link);
 
-      // Also open in a new tab as fallback for Safari
-      // Safari will show the PDF inline with native share/save options
+      // Clean up blob URL immediately (same as Android)
+      window.URL.revokeObjectURL(url);
+
+      // Refocus main window to keep it active (iOS-specific addition for polling)
       setTimeout(() => {
-        // Don't revoke immediately — give the browser time to process
-        // We'll revoke after a generous delay
+        window.focus(); // Bring focus back to main tab to keep polling active
+        console.log('✅ PDF downloaded, main tab refocused to keep polling active');
       }, 100);
-
-      // Refocus main window to keep it active (iOS-specific for polling)
-      setTimeout(() => {
-        window.focus();
-        console.log('✅ PDF download triggered, main tab refocused');
-      }, 200);
-
-      // Delay blob URL cleanup to give mobile browser time to start the download
-      setTimeout(() => {
-        window.URL.revokeObjectURL(url);
-      }, 10000); // 10 second delay before cleanup
-
-    } else if (isMobileBrowser) {
-      // Android / other mobile: link.click() generally works but needs delayed cleanup
-      console.log('📱 Mobile device: Using link.click() with delayed URL cleanup');
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-
-      // Delay blob URL cleanup — mobile browsers are slower to start downloads
-      setTimeout(() => {
-        window.URL.revokeObjectURL(url);
-      }, 5000); // 5 second delay before cleanup
-
     } else {
-      // Desktop: Use link.click() approach — instant download
-      console.log('🖥️ Desktop: Using link.click() download method');
+      // Non-iOS: Use link.click() approach
+      console.log('📱 Non-iOS device: Using link.click() download method');
       const link = document.createElement('a');
       link.href = url;
       link.download = filename;
@@ -2927,193 +3085,153 @@ export function VendorDashboard() {
     setLabelDownloadLoading(prev => ({ ...prev, [orderId]: true }));
 
     try {
-      console.log('🔵 FRONTEND: Starting download label process');
+      console.log('🔵 FRONTEND: Starting download label process (async)');
       console.log('  - order_id:', orderId);
-      console.log('  - order_id type:', typeof orderId);
       console.log('  - format:', format);
 
-      // Debug: Check auth header and vendor token
-      const authHeader = localStorage.getItem('authHeader');
-      const vendorToken = localStorage.getItem('vendorToken');
-      console.log('🔍 FRONTEND: Auth header:', authHeader ? authHeader.substring(0, 20) + '...' : 'null');
-      console.log('🔍 FRONTEND: Vendor token:', vendorToken ? vendorToken.substring(0, 20) + '...' : 'null');
-
-      // Call the download label API with async:true — fires immediately, polls in background
+      // Call the download label API with async:true so it returns a taskId immediately
       const response = await apiClient.downloadLabel(orderId, format, true);
 
-      // If async mode returned a taskId, polling is running via useAsyncTask hook
-      if ((response as any).async && (response as any).taskId) {
-        // Submit to the polling hook with onComplete/onError callbacks
-        await submitTask(
-          async () => response,
-          'download-label',
-          { orderId, format },
-          async (result) => {
-            // Called when polling detects completion
-            setLabelDownloadLoading(prev => ({ ...prev, [orderId]: false }));
-            if (result?.success && result?.data) {
-              const { shipping_url, awb, original_order_id, clone_order_id, formatted_pdf, format: responseFormat } = result.data;
-              const orderDisplayId = clone_order_id || original_order_id || orderId;
-              if (formatted_pdf && (responseFormat === 'a4' || responseFormat === 'four-in-one')) {
-                const binaryString = atob(formatted_pdf);
+      console.log('📥 FRONTEND: Download label async response received');
+      console.log('  - taskId:', (response as any).taskId);
+
+      if ((response as any).taskId) {
+        // Background: poll until done, then deliver via onComplete callback
+        const taskId = (response as any).taskId;
+        registerTask(
+          taskId,
+          // onComplete override for richer UX (knows the orderId + format)
+          async (tId: string, result: any) => {
+            if (result?.pdfBase64) {
+              try {
+                const binaryString = atob(result.pdfBase64);
                 const bytes = new Uint8Array(binaryString.length);
-                for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
+                for (let i = 0; i < binaryString.length; i++) {
+                  bytes[i] = binaryString.charCodeAt(i);
+                }
                 const blob = new Blob([bytes], { type: 'application/pdf' });
                 const url = window.URL.createObjectURL(blob);
                 const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, '');
                 const vendorId = user?.warehouseId || 'unknown';
                 const vendorCity = vendorAddress?.city || 'unknown';
-                await downloadFile(url, `${vendorId}_${vendorCity}_${currentDate}_${responseFormat}.pdf`);
-              } else if (shipping_url) {
-                const blob = await apiClient.downloadLabelFile(shipping_url);
-                const url = window.URL.createObjectURL(blob);
-                const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-                const vendorId = user?.warehouseId || 'unknown';
-                const vendorCity = vendorAddress?.city || 'unknown';
-                await downloadFile(url, `${vendorId}_${vendorCity}_${currentDate}.pdf`);
+                const filename = `${vendorId}_${vendorCity}_${currentDate}_${format}.pdf`;
+                await downloadFile(url, filename);
+                toast({ title: 'Label Downloaded', description: `Label for order ${orderId} downloaded.` });
+                await refreshOrders();
+              } catch {
+                toast({ title: 'Download Failed', description: 'Could not decode label PDF.', variant: 'destructive' });
               }
-              toast({ title: '✅ Label Downloaded', description: `Label for order ${orderDisplayId} downloaded successfully` });
-              // Optimistically update UI immediately (stable state setter, no stale closure issue)
-              optimisticallyMarkLabelDownloaded(orderId);
-              // Also refresh from API in background for full consistency
-              try { await refreshOrders(); } catch (e) { console.log('⚠️ Background refresh failed, but optimistic update is applied'); }
-            } else {
-              toast({ title: '⚠️ Label Issue', description: result?.message || 'Label generated but could not be downloaded', className: 'bg-yellow-50 border-yellow-400 text-yellow-800' });
+            } else if (result?.success && result?.data) {
+              // JSON result with shipping_url etc. (non-async fallback case or cached)
+              const { shipping_url, awb, original_order_id, clone_order_id, formatted_pdf, format: responseFormat } = result.data;
+              const orderDisplayId = clone_order_id || original_order_id || orderId;
+              if (formatted_pdf && (responseFormat === 'a4' || responseFormat === 'four-in-one')) {
+                try {
+                  const binaryString = atob(formatted_pdf);
+                  const bytes = new Uint8Array(binaryString.length);
+                  for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
+                  const blob = new Blob([bytes], { type: 'application/pdf' });
+                  const url = window.URL.createObjectURL(blob);
+                  const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+                  const vendorId = user?.warehouseId || 'unknown';
+                  const vendorCity = vendorAddress?.city || 'unknown';
+                  const filename = `${vendorId}_${vendorCity}_${currentDate}_${responseFormat}.pdf`;
+                  await downloadFile(url, filename);
+                  toast({ title: 'Label Downloaded', description: `${responseFormat} label for order ${orderDisplayId} downloaded.` });
+                  await refreshOrders();
+                } catch {
+                  window.open(shipping_url, '_blank');
+                  toast({ title: 'Label Generated', description: 'Opening label in new tab.' });
+                }
+              } else {
+                // Thermal – fetch from url via proxy
+                try {
+                  const blob = await apiClient.downloadLabelFile(shipping_url);
+                  const url = window.URL.createObjectURL(blob);
+                  const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+                  const vendorId = user?.warehouseId || 'unknown';
+                  const vendorCity = vendorAddress?.city || 'unknown';
+                  const filename = `${vendorId}_${vendorCity}_${currentDate}.pdf`;
+                  await downloadFile(url, filename);
+                  toast({ title: 'Label Downloaded', description: `${format} label for order ${orderDisplayId} downloaded.` });
+                  await refreshOrders();
+                } catch {
+                  window.open(shipping_url, '_blank');
+                  toast({ title: 'Label Generated', description: 'Opening label in new tab.' });
+                }
+              }
+            } else if (result?.warning) {
+              toast({ title: '⚠️ Label Generation Issue', description: result.userMessage || result.message || 'Could not generate label', className: 'bg-yellow-50 border-yellow-400 text-yellow-800' });
             }
-          },
-          (error) => {
+
+            // Clear loading regardless
             setLabelDownloadLoading(prev => ({ ...prev, [orderId]: false }));
-            toast({ title: 'Download Label Failed', description: error, variant: 'destructive' });
+          },
+          // onError override
+          (tId: string, error: string) => {
+            toast({ title: 'Download Label Failed', description: error || 'An error occurred while generating the label.', variant: 'destructive' });
+            setLabelDownloadLoading(prev => ({ ...prev, [orderId]: false }));
           }
         );
-        return; // Polling handles the rest
+
+        toast({
+          title: '📥 Label Generation Started',
+          description: 'Generating label in background — you can minimize the app. We\'ll notify you when done.',
+        });
+
+        // Note: Don't clear loading here — the task callbacks do it
+        return;
       }
 
-      console.log('📥 FRONTEND: Download label response received (sync mode)');
-      console.log('  - success:', response.success);
-      console.log('  - data:', response.data);
-
+      // Fallback: sync response (async: false response or error)
       if (response.success && response.data) {
         const { shipping_url, awb, original_order_id, clone_order_id, formatted_pdf, format: responseFormat } = response.data;
 
-        console.log('✅ FRONTEND: Label generated successfully');
-        console.log('  - Shipping URL:', shipping_url);
-        console.log('  - AWB:', awb);
-        console.log('  - Format:', responseFormat);
-        console.log('  - Has formatted PDF:', !!formatted_pdf);
+        console.log('✅ FRONTEND: Label generated successfully (sync)');
 
-        // Handle different formats
         if (formatted_pdf && (responseFormat === 'a4' || responseFormat === 'four-in-one')) {
-          // Handle A4 and four-in-one formats with base64 PDF
           try {
-            console.log('🔄 FRONTEND: Processing formatted PDF...');
-
-            // Convert base64 to blob
             const binaryString = atob(formatted_pdf);
             const bytes = new Uint8Array(binaryString.length);
             for (let i = 0; i < binaryString.length; i++) {
               bytes[i] = binaryString.charCodeAt(i);
             }
             const blob = new Blob([bytes], { type: 'application/pdf' });
-
-            // Create download URL
             const url = window.URL.createObjectURL(blob);
-
-            // Generate filename with format: {vendor_id}_{vendor_city}_{current_date}_{format}
-            const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, ''); // yyyymmdd format
+            const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, '');
             const vendorId = user?.warehouseId || 'unknown';
             const vendorCity = vendorAddress?.city || 'unknown';
             const filename = `${vendorId}_${vendorCity}_${currentDate}_${responseFormat}.pdf`;
-
-            // Download using iOS-compatible method
             await downloadFile(url, filename);
-
-            console.log('✅ FRONTEND: Formatted PDF downloaded successfully');
-
-            // Show success message
             const orderDisplayId = clone_order_id || original_order_id || orderId;
-            toast({
-              title: "Label Downloaded",
-              description: `${responseFormat} label for order ${orderDisplayId} downloaded successfully`,
-            });
-
-            // Optimistically update UI immediately, then refresh from API
-            optimisticallyMarkLabelDownloaded(orderId);
-            try { await refreshOrders(); } catch (e) { console.log('⚠️ Background refresh failed, but optimistic update is applied'); }
-
-          } catch (pdfError) {
-            console.error('❌ FRONTEND: Formatted PDF download failed:', pdfError);
-
-            // Fallback: open original URL in new tab
+            toast({ title: 'Label Downloaded', description: `${responseFormat} label for order ${orderDisplayId} downloaded successfully` });
+            await refreshOrders();
+          } catch {
             window.open(shipping_url, '_blank');
-
-            toast({
-              title: "Label Generated",
-              description: `Label generated successfully. Opening in new tab.`,
-            });
+            toast({ title: 'Label Generated', description: 'Opening in new tab.' });
           }
         } else {
-          // Handle thermal format (original behavior)
           try {
             const blob = await apiClient.downloadLabelFile(shipping_url);
-
-            // Create download URL
             const url = window.URL.createObjectURL(blob);
-
-            // Generate filename with format: {vendor_id}_{vendor_city}_{current_date}
-            const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, ''); // yyyymmdd format
+            const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, '');
             const vendorId = user?.warehouseId || 'unknown';
             const vendorCity = vendorAddress?.city || 'unknown';
             const filename = `${vendorId}_${vendorCity}_${currentDate}.pdf`;
-
-            // Download using iOS-compatible method
             await downloadFile(url, filename);
-
-            console.log('✅ FRONTEND: Label file downloaded successfully');
-
-            // Show success message
             const orderDisplayId = clone_order_id || original_order_id || orderId;
-            toast({
-              title: "Label Downloaded",
-              description: `${format} label for order ${orderDisplayId} downloaded successfully`,
-            });
-
-            // Optimistically update UI immediately, then refresh from API
-            optimisticallyMarkLabelDownloaded(orderId);
-            try { await refreshOrders(); } catch (e) { console.log('⚠️ Background refresh failed, but optimistic update is applied'); }
-
-          } catch (downloadError) {
-            console.error('❌ FRONTEND: Label file download failed:', downloadError);
-
-            // Fallback: open in new tab
+            toast({ title: 'Label Downloaded', description: `${format} label for order ${orderDisplayId} downloaded successfully` });
+            await refreshOrders();
+          } catch {
             window.open(shipping_url, '_blank');
-
-            toast({
-              title: "Label Generated",
-              description: `Label generated successfully. Opening in new tab.`,
-            });
+            toast({ title: 'Label Generated', description: 'Opening in new tab.' });
           }
         }
-
       } else {
-        console.log('❌ FRONTEND: Download label failed');
-        console.log('  - Error message:', response.message);
-        console.log('  - Warning flag:', response.warning);
-        console.log('  - User message:', response.userMessage);
-
-        // Show warning toast with yellowish color for non-blocking errors
         if (response.warning) {
-          toast({
-            title: '⚠️ Label Generation Issue',
-            description: response.userMessage || response.message || 'Could not generate label',
-            className: 'bg-yellow-50 border-yellow-400 text-yellow-800',
-          });
+          toast({ title: '⚠️ Label Generation Issue', description: response.userMessage || response.message || 'Could not generate label', className: 'bg-yellow-50 border-yellow-400 text-yellow-800' });
         } else {
-          toast({
-            title: 'Download Label Failed',
-            description: response.message || 'Could not generate label',
-            variant: 'destructive',
-          });
+          toast({ title: 'Download Label Failed', description: response.message || 'Could not generate label', variant: 'destructive' });
         }
       }
 
@@ -3147,66 +3265,152 @@ export function VendorDashboard() {
       return
     }
 
-    setBulkDownloadLoading(true);
+    // Show format selection dialog first (unified for all shipping partners)
+    setPendingDownloadOrderIds(selectedOrders);
+    setSelectedDownloadFormat("thermal");
+    setShowFormatDialog(true);
+  }
+
+  /**
+   * Unified label download flow (handles both Shipway + Shiprocket transparently):
+   * 1. User selects format → clicks "Generate & Download"
+   * 2. Backend processes all orders (Shipway labels + Shiprocket clone/AWB/labels)
+   * 3. Backend returns successful order_ids with labels stored in DB
+   * 4. Frontend calls merge endpoint to combine all PDFs
+   * 5. Download merged PDF
+   */
+  const handleGenerateAndDownload = async () => {
+    if (pendingDownloadOrderIds.length === 0) return;
+
+    setDownloadProcessing(true);
 
     try {
-      // Use async mode: backend generates labels, returns taskId immediately
-      const initResponse = await apiClient.bulkDownloadLabels(selectedOrders, labelFormat, true, true);
+      toast({
+        title: '📥 Generating Labels in Background',
+        description: `Processing ${pendingDownloadOrderIds.length} orders — you can minimize the app. We\'ll notify you when done.`,
+      });
 
-      if (initResponse && 'taskId' in initResponse && (initResponse as any).taskId) {
-        // Poll for completion
-        await submitTask(
-          async () => initResponse as any,
-          'bulk-download-labels',
-          { orderCount: selectedOrders.length, format: labelFormat },
-          (result) => {
-            setBulkDownloadLoading(false);
-            if (result?.success && result?.data) {
-              const data = result.data;
-              setMergeDialogData({
-                successful: data.successful || [],
-                failed: data.failed || [],
-                totalSuccessful: data.total_successful || 0,
-                totalFailed: data.total_failed || 0
-              });
-              setSelectedMergeFormat(labelFormat);
-              setShowMergeDialog(true);
-            } else {
-              toast({ title: 'Label Generation Failed', description: result?.message || 'Could not generate labels', variant: 'destructive' });
+      console.log('🔵 FRONTEND: Unified label generation (async) - format:', selectedDownloadFormat);
+      console.log('  - Orders:', pendingDownloadOrderIds);
+
+      // Step 1: Submit async task for bulk label generation
+      const generateResponse = await apiClient.bulkDownloadLabels(
+        pendingDownloadOrderIds,
+        selectedDownloadFormat,
+        true,  // generate_only
+        true   // runAsync
+      ) as any;
+
+      console.log('📥 FRONTEND: Async task submitted:', generateResponse);
+
+      if (generateResponse?.taskId) {
+        const capturedOrderIds = [...pendingDownloadOrderIds];
+        const capturedFormat = selectedDownloadFormat;
+
+        registerTask(
+          generateResponse.taskId,
+          async (tId: string, result: any) => {
+            if (!result?.success) {
+              toast({ title: 'Label Generation Failed', description: result?.message || 'All orders failed.', variant: 'destructive' });
+              return;
+            }
+
+            const { successful, failed, total_successful, total_failed } = result.data || {};
+
+            if (!successful || successful.length === 0) {
+              toast({ title: 'Label Generation Failed', description: `All ${total_failed || capturedOrderIds.length} orders failed.`, variant: 'destructive' });
+              return;
+            }
+
+            // Notify and start merge
+            toast({ title: 'Labels Generated!', description: `Merging ${successful.length} labels into PDF...` });
+
+            try {
+              const mergeResponse = await apiClient.bulkDownloadLabelsMerge(successful, capturedFormat, true) as any;
+
+              if (mergeResponse?.taskId) {
+                registerTask(
+                  mergeResponse.taskId,
+                  async (mId: string, mergeResult: any) => {
+                    if (mergeResult?.pdfBase64) {
+                      try {
+                        const binaryString = atob(mergeResult.pdfBase64);
+                        const bytes = new Uint8Array(binaryString.length);
+                        for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
+                        const blob = new Blob([bytes], { type: 'application/pdf' });
+                        const url = window.URL.createObjectURL(blob);
+                        const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+                        const vendorId = user?.warehouseId || 'unknown';
+                        const vendorCity = vendorAddress?.city || 'unknown';
+                        const filename = `${vendorId}_${vendorCity}_${currentDate}_${capturedFormat}.pdf`;
+                        await downloadFile(url, filename);
+                        if ((total_failed ?? 0) > 0) {
+                          toast({ title: '⚠️ Download Completed with Warnings', description: `${total_successful} labels downloaded, ${total_failed} failed.`, className: 'bg-yellow-50 border-yellow-400 text-yellow-800' });
+                        } else {
+                          toast({ title: 'Labels Downloaded', description: `Successfully downloaded labels for ${total_successful} orders` });
+                        }
+                        await refreshOrders();
+                      } catch {
+                        toast({ title: 'Download Failed', description: 'Could not decode merged PDF.', variant: 'destructive' });
+                      }
+                    }
+                  },
+                  (mId: string, error: string) => {
+                    toast({ title: 'PDF Merge Failed', description: error || 'Merge task failed.', variant: 'destructive' });
+                  }
+                );
+              }
+            } catch (mergeErr: any) {
+              toast({ title: 'PDF Merge Failed', description: mergeErr?.message || 'Could not start merge.', variant: 'destructive' });
             }
           },
-          (error) => {
-            setBulkDownloadLoading(false);
-            toast({ title: 'Label Generation Failed', description: error, variant: 'destructive' });
+          (tId: string, error: string) => {
+            toast({ title: 'Label Generation Failed', description: error || 'Background task failed.', variant: 'destructive' });
           }
         );
+
+        // Close dialog immediately — background will handle the rest
+        setShowFormatDialog(false);
+        setPendingDownloadOrderIds([]);
         return;
       }
 
-      // Fallback: sync response (shouldn't happen, but handle gracefully)
-      if (initResponse && 'success' in initResponse && initResponse.success) {
-        const data = (initResponse as any).data;
-        setMergeDialogData({
-          successful: data.successful || [],
-          failed: data.failed || [],
-          totalSuccessful: data.total_successful || 0,
-          totalFailed: data.total_failed || 0,
-        });
-        setSelectedMergeFormat(labelFormat);
-        setShowMergeDialog(true);
-        setBulkDownloadLoading(false);
-      } else {
-        throw new Error('Invalid response from label generation');
+      // Fallback: sync path (non-async response)
+      if (!generateResponse || !('success' in generateResponse)) throw new Error('Invalid response from label generation');
+      if (!generateResponse.success) throw new Error(generateResponse.message || 'Label generation failed');
+
+      const { successful, failed, total_successful, total_failed } = generateResponse.data;
+      if (!successful || successful.length === 0) {
+        toast({ title: 'Label Generation Failed', description: `All ${total_failed || pendingDownloadOrderIds.length} orders failed.`, variant: 'destructive' });
+        return;
       }
 
+      toast({ title: 'Merging Labels', description: `Merging ${successful.length} labels into PDF (${selectedDownloadFormat} format)...` });
+      const blob = await apiClient.bulkDownloadLabelsMerge(successful, selectedDownloadFormat) as Blob;
+      const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      const vendorId = user?.warehouseId || 'unknown';
+      const vendorCity = vendorAddress?.city || 'unknown';
+      const filename = `${vendorId}_${vendorCity}_${currentDate}_${selectedDownloadFormat}.pdf`;
+      const url = window.URL.createObjectURL(blob);
+      await downloadFile(url, filename);
+      setShowFormatDialog(false);
+      setPendingDownloadOrderIds([]);
+      if (total_failed > 0) {
+        toast({ title: '⚠️ Download Completed with Warnings', description: `${total_successful} labels downloaded, ${total_failed} order(s) failed.`, className: 'bg-yellow-50 border-yellow-400 text-yellow-800' });
+      } else {
+        toast({ title: 'Labels Downloaded', description: `Successfully downloaded labels for ${total_successful} orders` });
+      }
+      await refreshOrders();
+
     } catch (error) {
-      console.error('❌ FRONTEND: Bulk label generation error:', error);
+      console.error('❌ FRONTEND: Label download error:', error);
       toast({
-        title: 'Label Generation Failed',
+        title: 'Label Download Failed',
         description: error instanceof Error ? error.message : 'An error occurred while generating labels',
         variant: 'destructive',
-      })
-      setBulkDownloadLoading(false);
+      });
+    } finally {
+      setDownloadProcessing(false);
     }
   }
 
@@ -3216,110 +3420,101 @@ export function VendorDashboard() {
     }
 
     setMergeLoading(true);
-    let isAsyncTask = false; // Track if we entered the async polling path
 
     try {
       toast({
-        title: "Merging Labels",
-        description: `Merging ${mergeDialogData.successful.length} labels into PDF (${selectedMergeFormat} format)...`,
-      })
+        title: '📥 Merge Started in Background',
+        description: `Merging ${mergeDialogData.successful.length} labels — you can minimize the app. We\'ll notify you when done.`,
+      });
 
-      console.log('🔵 FRONTEND: Starting PDF merge process');
+      console.log('🔵 FRONTEND: Starting PDF merge process (async)');
       console.log('  - order_ids:', mergeDialogData.successful);
       console.log('  - format:', selectedMergeFormat);
 
-      // Use async mode: backend merges PDFs, returns taskId immediately
-      const initResponse = await apiClient.bulkDownloadLabelsMerge(mergeDialogData.successful, selectedMergeFormat, true);
+      const capturedSuccessful = [...mergeDialogData.successful];
+      const capturedFormat = selectedMergeFormat;
+      const capturedTotalSuccessful = mergeDialogData.totalSuccessful;
+      const capturedTotalFailed = mergeDialogData.totalFailed;
 
-      if (initResponse && 'taskId' in (initResponse as any) && (initResponse as any).taskId) {
-        // Mark as async — finally block will NOT reset mergeLoading.
-        // The onComplete/onError callbacks will handle it when polling completes.
-        isAsyncTask = true;
+      // Submit async merge task
+      const mergeResponse = await apiClient.bulkDownloadLabelsMerge(capturedSuccessful, capturedFormat, true) as any;
 
-        await submitTask(
-          async () => initResponse as any,
-          'bulk-download-merge',
-          { orderCount: mergeDialogData.successful.length, format: selectedMergeFormat },
-          async (result) => {
+      if (mergeResponse?.taskId) {
+        registerTask(
+          mergeResponse.taskId,
+          async (tId: string, result: any) => {
             if (result?.pdfBase64) {
-              // Convert base64 back to blob & download
-              const binaryString = atob(result.pdfBase64);
-              const bytes = new Uint8Array(binaryString.length);
-              for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
-              const blob = new Blob([bytes], { type: 'application/pdf' });
-              const url = window.URL.createObjectURL(blob);
-              const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-              const vendorId = user?.warehouseId || 'unknown';
-              const vendorCity = vendorAddress?.city || 'unknown';
-              await downloadFile(url, `${vendorId}_${vendorCity}_${currentDate}_${selectedMergeFormat}.pdf`);
-              toast({ title: '✅ Bulk Download Complete', description: `Downloaded labels for ${mergeDialogData!.totalSuccessful} orders` });
-            } else {
-              toast({ title: '⚠️ Merge Issue', description: 'Labels merged but PDF data was empty', className: 'bg-yellow-50 border-yellow-400 text-yellow-800' });
+              try {
+                const binaryString = atob(result.pdfBase64);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
+                const blob = new Blob([bytes], { type: 'application/pdf' });
+                const url = window.URL.createObjectURL(blob);
+                const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+                const vendorId = user?.warehouseId || 'unknown';
+                const vendorCity = vendorAddress?.city || 'unknown';
+                const filename = `${vendorId}_${vendorCity}_${currentDate}_${capturedFormat}.pdf`;
+                await downloadFile(url, filename);
+
+                if (capturedTotalFailed > 0) {
+                  toast({ title: '⚠️ Bulk Download Completed with Warnings', description: `Labels downloaded, but ${capturedTotalFailed} order(s) failed.`, className: 'bg-yellow-50 border-yellow-400 text-yellow-800' });
+                } else {
+                  toast({ title: 'Bulk Download Complete', description: `Successfully downloaded labels for ${capturedTotalSuccessful} orders` });
+                }
+
+                // Refresh My Orders tab
+                try {
+                  setGroupedOrdersPage(1);
+                  const groupedResponse = await apiClient.getGroupedOrders(1, 50);
+                  if (groupedResponse.success && groupedResponse.data && Array.isArray(groupedResponse.data.groupedOrders)) {
+                    setGroupedOrders(groupedResponse.data.groupedOrders);
+                    if (groupedResponse.data.pagination) {
+                      setGroupedOrdersHasMore(groupedResponse.data.pagination.hasMore);
+                      setGroupedOrdersTotalCount(groupedResponse.data.pagination.total);
+                    }
+                  }
+                } catch (_) {}
+
+                // Clear selected orders
+                const activeTab = selectedMyOrders.length > 0 ? 'my-orders' : 'all-orders';
+                if (activeTab === 'my-orders') setSelectedMyOrders([]);
+                else setSelectedOrdersForDownload([]);
+              } catch {
+                toast({ title: 'Download Failed', description: 'Could not decode merged PDF.', variant: 'destructive' });
+              }
             }
-            // Only now clear the loading + close dialog
             setMergeLoading(false);
-            setShowMergeDialog(false);
-            setMergeDialogData(null);
-            // Optimistically mark all successful orders as label_downloaded
-            if (mergeDialogData?.successful) {
-              mergeDialogData.successful.forEach(oid => optimisticallyMarkLabelDownloaded(oid));
-            }
-            // Background refresh for full consistency
-            try { await refreshOrders(); } catch (e) { console.log('⚠️ Background refresh after merge failed, but optimistic update is applied'); }
           },
-          (error) => {
+          (tId: string, error: string) => {
+            toast({ title: 'PDF Merge Failed', description: error || 'Merge task failed.', variant: 'destructive' });
             setMergeLoading(false);
-            toast({ title: 'PDF Merge Failed', description: error, variant: 'destructive' });
           }
         );
-        // Don't fall through to finally — mergeLoading is managed by callbacks above
+
+        // Close dialog — background handles the rest
+        setShowMergeDialog(false);
+        setMergeDialogData(null);
+        // Note: don't clear mergeLoading here — task callbacks do it
         return;
       }
 
-      // Fallback: sync — blob was returned directly (old behavior)
-      const blob = initResponse as Blob;
-
-      console.log('📥 FRONTEND: PDF merge response received');
-      console.log('  - blob size:', blob.size);
-      console.log('  - blob type:', blob.type);
-
-      // Create download URL for the combined PDF
+      // Fallback: sync blob response
+      const blob = mergeResponse as Blob;
       const url = window.URL.createObjectURL(blob);
-
-      // Generate filename with format: {vendor_id}_{vendor_city}_{current_date}_{format}
-      const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, ''); // yyyymmdd format
+      const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, '');
       const vendorId = user?.warehouseId || 'unknown';
       const vendorCity = vendorAddress?.city || 'unknown';
       const filename = `${vendorId}_${vendorCity}_${currentDate}_${selectedMergeFormat}.pdf`;
-
-      // Download using iOS-compatible method
       await downloadFile(url, filename);
 
-      console.log('✅ FRONTEND: Bulk labels PDF merged and downloaded successfully');
-
-      // Show success toast
-      if (mergeDialogData.totalFailed > 0) {
-        toast({
-          title: "⚠️ Bulk Download Completed with Warnings",
-          description: `Downloaded labels successfully, but ${mergeDialogData.totalFailed} order(s) failed. Please contact admin.`,
-          className: 'bg-yellow-50 border-yellow-400 text-yellow-800',
-        });
+      if (capturedTotalFailed > 0) {
+        toast({ title: '⚠️ Bulk Download Completed with Warnings', description: `Labels downloaded, but ${capturedTotalFailed} order(s) failed.`, className: 'bg-yellow-50 border-yellow-400 text-yellow-800' });
       } else {
-        toast({
-          title: "Bulk Download Complete",
-          description: `Successfully downloaded labels for ${mergeDialogData.totalSuccessful} orders`,
-        });
+        toast({ title: 'Bulk Download Complete', description: `Successfully downloaded labels for ${capturedTotalSuccessful} orders` });
       }
-
-      // Close dialog
       setShowMergeDialog(false);
       setMergeDialogData(null);
 
-      // Optimistically mark all successful orders as label_downloaded
-      mergeDialogData.successful.forEach(oid => optimisticallyMarkLabelDownloaded(oid));
-
-      // OPTIMIZATION: Only refresh "My Orders" tab with pagination (fast) instead of all orders (slow)
-      console.log('🔄 FRONTEND: Refreshing grouped orders for My Orders tab...');
       try {
         setGroupedOrdersPage(1);
         const groupedResponse = await apiClient.getGroupedOrders(1, 50);
@@ -3329,19 +3524,12 @@ export function VendorDashboard() {
             setGroupedOrdersHasMore(groupedResponse.data.pagination.hasMore);
             setGroupedOrdersTotalCount(groupedResponse.data.pagination.total);
           }
-          console.log('✅ FRONTEND: Grouped orders refreshed successfully');
         }
-      } catch (refreshError) {
-        console.log('⚠️ FRONTEND: Failed to refresh grouped orders, but bulk download was successful:', refreshError);
-      }
+      } catch (_) {}
 
-      // Clear selected orders
-      const activeTab = selectedMyOrders.length > 0 ? "my-orders" : "all-orders";
-      if (activeTab === "my-orders") {
-        setSelectedMyOrders([])
-      } else {
-        setSelectedOrdersForDownload([])
-      }
+      const at = selectedMyOrders.length > 0 ? 'my-orders' : 'all-orders';
+      if (at === 'my-orders') setSelectedMyOrders([]);
+      else setSelectedOrdersForDownload([]);
 
     } catch (error) {
       console.error('❌ FRONTEND: PDF merge error:', error);
@@ -3351,12 +3539,7 @@ export function VendorDashboard() {
         variant: 'destructive',
       })
     } finally {
-      // Only reset mergeLoading for sync path and error cases.
-      // For async tasks, the onComplete/onError callbacks manage mergeLoading.
-      // NOTE: finally ALWAYS runs in JS, even after return — hence the flag check.
-      if (!isAsyncTask) {
-        setMergeLoading(false);
-      }
+      setMergeLoading(false);
     }
   }
 
@@ -3834,110 +4017,96 @@ export function VendorDashboard() {
   const handleRefreshOrders = async () => {
     setOrdersRefreshing(true);
     try {
-      // Use async:true — backend syncs with Shipway in background, returns taskId immediately
-      const initResponse = await apiClient.refreshOrders(true);
+      // Submit async refresh task so it runs in background even if tab is hidden
+      const response = await apiClient.refreshOrders(true);
 
-      if ((initResponse as any).async && (initResponse as any).taskId) {
-        await submitTask(
-          async () => initResponse,
-          'refresh',
-          {},
-          async () => {
-            setOrdersRefreshing(false);
-            toast({ title: '✅ Orders Refreshed', description: 'Your orders have been refreshed from Shipway.' });
-            // Re-fetch orders after sync
-            setActiveTab("all-orders");
+      if ((response as any)?.taskId) {
+        registerTask(
+          (response as any).taskId,
+          async (tId: string, result: any) => {
+            toast({
+              title: 'Orders Refreshed',
+              description: result?.message || 'Your orders have been refreshed from Shipway.',
+            });
+            // Re-fetch local data
+            setActiveTab('all-orders');
             setTabFilters({
-              "all-orders": { searchTerm: "", dateFrom: undefined, dateTo: undefined },
-              "my-orders": { searchTerm: "", dateFrom: undefined, dateTo: undefined },
-              "handover": { searchTerm: "", dateFrom: undefined, dateTo: undefined },
-              "order-tracking": { searchTerm: "", dateFrom: undefined, dateTo: undefined },
+              'all-orders': { searchTerm: '', dateFrom: undefined, dateTo: undefined },
+              'my-orders': { searchTerm: '', dateFrom: undefined, dateTo: undefined },
+              'handover': { searchTerm: '', dateFrom: undefined, dateTo: undefined },
+              'order-tracking': { searchTerm: '', dateFrom: undefined, dateTo: undefined },
             });
             try {
               const ordersResponse = await apiClient.getOrders();
-              if (ordersResponse.success && ordersResponse.data) setOrders(ordersResponse.data.orders || []);
-              setGroupedOrdersPage(1);
-              const gr = await apiClient.getGroupedOrders(1, 50);
-              if (gr.success && gr.data) {
-                setGroupedOrders(gr.data.groupedOrders || []);
-                if (gr.data.pagination) { setGroupedOrdersHasMore(gr.data.pagination.hasMore); setGroupedOrdersTotalCount(gr.data.pagination.total); }
+              if (ordersResponse.success && ordersResponse.data && Array.isArray(ordersResponse.data.orders)) {
+                setOrders(ordersResponse.data.orders);
               }
-            } catch (e) { console.warn('Refresh post-fetch failed:', e); }
-          },
-          (error) => {
+              setGroupedOrdersPage(1);
+              const groupedResponse = await apiClient.getGroupedOrders(1, 50);
+              if (groupedResponse.success && groupedResponse.data && Array.isArray(groupedResponse.data.groupedOrders)) {
+                setGroupedOrders(groupedResponse.data.groupedOrders);
+                if (groupedResponse.data.pagination) {
+                  setGroupedOrdersHasMore(groupedResponse.data.pagination.hasMore);
+                  setGroupedOrdersTotalCount(groupedResponse.data.pagination.total);
+                }
+              }
+              await fetchHandoverOrders();
+              await fetchOrderTrackingOrders();
+            } catch (_) {}
             setOrdersRefreshing(false);
-            toast({ title: 'Refresh Failed', description: error, variant: 'destructive' });
+          },
+          (tId: string, error: string) => {
+            toast({ title: 'Refresh Failed', description: error || 'Failed to refresh orders.', variant: 'destructive' });
+            setOrdersRefreshing(false);
           }
         );
+        toast({
+          title: '🔄 Refresh Started',
+          description: 'Syncing orders with Shipway in background — this may take a moment.',
+        });
+        // Note: don't clear ordersRefreshing here — the task callback does it
         return;
       }
 
-      // Fallback: sync response (when async mode is not available)
-      if (initResponse.success) {
-        toast({
-          title: "Orders Refreshed",
-          description: "Your orders have been refreshed from Shipway.",
-        });
-
-        // Clear filters and refresh all orders
-        setActiveTab("all-orders");
+      // Fallback: sync path
+      if (response.success) {
+        toast({ title: 'Orders Refreshed', description: 'Your orders have been refreshed from Shipway.' });
+        setActiveTab('all-orders');
         setTabFilters({
-          "all-orders": { searchTerm: "", dateFrom: undefined, dateTo: undefined },
-          "my-orders": { searchTerm: "", dateFrom: undefined, dateTo: undefined },
-          "handover": { searchTerm: "", dateFrom: undefined, dateTo: undefined },
-          "order-tracking": { searchTerm: "", dateFrom: undefined, dateTo: undefined },
+          'all-orders': { searchTerm: '', dateFrom: undefined, dateTo: undefined },
+          'my-orders': { searchTerm: '', dateFrom: undefined, dateTo: undefined },
+          'handover': { searchTerm: '', dateFrom: undefined, dateTo: undefined },
+          'order-tracking': { searchTerm: '', dateFrom: undefined, dateTo: undefined },
         });
-
-        // Re-fetch all orders and grouped orders
         try {
           const ordersResponse = await apiClient.getOrders();
-          if (ordersResponse.success && ordersResponse.data && Array.isArray(ordersResponse.data.orders)) {
-            setOrders(ordersResponse.data.orders);
-            console.log('✅ FRONTEND: Orders refreshed successfully');
-          }
-
-          // Reset pagination and fetch first page
+          if (ordersResponse.success && ordersResponse.data && Array.isArray(ordersResponse.data.orders)) setOrders(ordersResponse.data.orders);
           setGroupedOrdersPage(1);
           const groupedResponse = await apiClient.getGroupedOrders(1, 50);
           if (groupedResponse.success && groupedResponse.data && Array.isArray(groupedResponse.data.groupedOrders)) {
             setGroupedOrders(groupedResponse.data.groupedOrders);
-
-            // Update pagination metadata
             if (groupedResponse.data.pagination) {
               setGroupedOrdersHasMore(groupedResponse.data.pagination.hasMore);
               setGroupedOrdersTotalCount(groupedResponse.data.pagination.total);
             }
-
-            console.log('✅ FRONTEND: Grouped orders refreshed successfully');
           }
-
-          // Refresh Handover orders
           await fetchHandoverOrders();
-
-          // Refresh Order Tracking orders
           await fetchOrderTrackingOrders();
-        } catch (refreshError) {
-          console.log('⚠️ FRONTEND: Failed to refresh orders data, but Shipway sync was successful');
-        }
-
-        console.log('✅ FRONTEND: Orders refreshed successfully via API');
+        } catch (_) {}
       } else {
-        toast({
-          title: "Refresh Failed",
-          description: initResponse.message || "Failed to refresh orders.",
-          variant: "destructive",
-        });
+        toast({ title: 'Refresh Failed', description: response.message || 'Failed to refresh orders.', variant: 'destructive' });
       }
     } catch (error) {
       console.error('❌ FRONTEND: Error refreshing orders:', error);
       toast({
-        title: "Refresh Failed",
-        description: error instanceof Error ? error.message : "An error occurred while refreshing orders.",
-        variant: "destructive",
+        title: 'Refresh Failed',
+        description: error instanceof Error ? error.message : 'An error occurred while refreshing orders.',
+        variant: 'destructive',
       });
     } finally {
       setOrdersRefreshing(false);
     }
+
   };
 
   return (
@@ -4492,10 +4661,10 @@ export function VendorDashboard() {
                       </div>
                       <Button
                         onClick={() => handleBulkDownloadLabels("my-orders")}
-                        disabled={getVisibleSelectedOrdersCount() === 0 || bulkDownloadLoading}
+                        disabled={getVisibleSelectedOrdersCount() === 0 || bulkDownloadLoading || downloadProcessing}
                         className="h-10 text-sm whitespace-nowrap px-4 min-w-fit bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg text-white"
                       >
-                        {bulkDownloadLoading ? (
+                        {bulkDownloadLoading || downloadProcessing ? (
                           <>
                             <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
                             Generating...
@@ -5493,10 +5662,10 @@ export function VendorDashboard() {
                         {/* Download Label Button */}
                         <Button
                           onClick={() => handleBulkDownloadLabels("my-orders")}
-                          disabled={getVisibleSelectedOrdersCount() === 0 || bulkDownloadLoading}
+                          disabled={getVisibleSelectedOrdersCount() === 0 || bulkDownloadLoading || downloadProcessing}
                           className="flex-1 h-10 sm:h-12 text-xs sm:text-sm md:text-base font-medium bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg min-w-0 px-2 sm:px-3"
                         >
-                          {bulkDownloadLoading ? (
+                          {bulkDownloadLoading || downloadProcessing ? (
                             <>
                               <div className={`animate-spin rounded-full border-b-2 border-white ${isMobile ? 'h-3 w-3 mr-1 sm:h-4 sm:w-4 sm:mr-2' : 'h-4 w-4 mr-2'}`}></div>
                               <span className="whitespace-nowrap">{isMobile ? 'Loading' : 'Generating...'}</span>
@@ -6339,27 +6508,6 @@ export function VendorDashboard() {
             </div>
           </div>
 
-          {/* Progress indicator during merge */}
-          {mergeLoading && (
-            <div className="py-4">
-              <div className="flex flex-col items-center gap-3 p-4 rounded-lg bg-blue-50 border border-blue-200">
-                <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
-                <div className="text-center">
-                  <p className="text-sm font-semibold text-blue-800">
-                    Merging labels into PDF...
-                  </p>
-                  <p className="text-xs text-blue-600 mt-1">
-                    This may take a moment. Please don&apos;t close this dialog.
-                  </p>
-                </div>
-                {/* Animated progress bar */}
-                <div className="w-full bg-blue-200 rounded-full h-1.5 overflow-hidden">
-                  <div className="bg-blue-600 h-1.5 rounded-full animate-pulse" style={{ width: '100%' }} />
-                </div>
-              </div>
-            </div>
-          )}
-
           <DialogFooter className={isMobile ? 'flex-col gap-2' : ''}>
             <Button
               variant="outline"
@@ -6381,7 +6529,7 @@ export function VendorDashboard() {
               {mergeLoading ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Merging & Preparing Download...
+                  Merging...
                 </>
               ) : (
                 <>
@@ -6394,17 +6542,137 @@ export function VendorDashboard() {
         </DialogContent>
       </Dialog>
 
+      {/* Unified Label Format Selection Dialog (shown before processing) */}
+      <Dialog open={showFormatDialog} onOpenChange={(open) => {
+        if (!downloadProcessing) {
+          setShowFormatDialog(open);
+        }
+      }}>
+        <DialogContent
+          className={`${isMobile ? 'max-w-[95vw] p-4' : 'max-w-md'}`}
+          onInteractOutside={(e) => { if (downloadProcessing) e.preventDefault(); }}
+          onEscapeKeyDown={(e) => { if (downloadProcessing) e.preventDefault(); }}
+        >
+          <DialogHeader>
+            <DialogTitle className={isMobile ? 'text-lg' : 'text-xl'}>
+              Download Labels
+            </DialogTitle>
+            <DialogDescription className={isMobile ? 'text-sm' : ''}>
+              Select format and download labels for {pendingDownloadOrderIds.length} selected order(s)
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div>
+              <Label className="text-base font-semibold mb-3 block">
+                Label Format:
+              </Label>
+              <div className="space-y-2">
+                <label className="flex items-center space-x-2 cursor-pointer p-2 rounded hover:bg-gray-50">
+                  <input
+                    type="radio"
+                    name="downloadFormat"
+                    value="thermal"
+                    checked={selectedDownloadFormat === "thermal"}
+                    onChange={(e) => setSelectedDownloadFormat(e.target.value)}
+                    className="w-4 h-4 text-blue-600"
+                    disabled={downloadProcessing}
+                  />
+                  <div>
+                    <span className="font-medium">Thermal (Default)</span>
+                    <p className="text-sm text-gray-500">4x6 labels in sequence</p>
+                  </div>
+                </label>
+
+                <label className="flex items-center space-x-2 cursor-pointer p-2 rounded hover:bg-gray-50">
+                  <input
+                    type="radio"
+                    name="downloadFormat"
+                    value="a4"
+                    checked={selectedDownloadFormat === "a4"}
+                    onChange={(e) => setSelectedDownloadFormat(e.target.value)}
+                    className="w-4 h-4 text-blue-600"
+                    disabled={downloadProcessing}
+                  />
+                  <div>
+                    <span className="font-medium">A4</span>
+                    <p className="text-sm text-gray-500">One label per A4 page</p>
+                  </div>
+                </label>
+
+                <label className="flex items-center space-x-2 cursor-pointer p-2 rounded hover:bg-gray-50">
+                  <input
+                    type="radio"
+                    name="downloadFormat"
+                    value="four-in-one"
+                    checked={selectedDownloadFormat === "four-in-one"}
+                    onChange={(e) => setSelectedDownloadFormat(e.target.value)}
+                    className="w-4 h-4 text-blue-600"
+                    disabled={downloadProcessing}
+                  />
+                  <div>
+                    <span className="font-medium">Four-in-One</span>
+                    <p className="text-sm text-gray-500">4 labels per A4 page</p>
+                  </div>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className={isMobile ? 'flex-col gap-2' : ''}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowFormatDialog(false);
+                setPendingDownloadOrderIds([]);
+              }}
+              disabled={downloadProcessing}
+              className={isMobile ? 'w-full' : ''}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleGenerateAndDownload}
+              disabled={downloadProcessing}
+              className={isMobile ? 'w-full' : ''}
+            >
+              {downloadProcessing ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Processing...
+                </>
+              ) : (
+                <>
+                  <Download className="w-4 h-4 mr-2" />
+                  Generate & Download
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Manifest Format Selection Dialog */}
-      <Dialog open={showManifestDialog} onOpenChange={setShowManifestDialog}>
+      <Dialog open={showManifestDialog} onOpenChange={(open) => {
+        setShowManifestDialog(open);
+        if (!open) {
+          // Reset state when dialog closes
+          setManifestDialogData(null);
+          setIsShiprocketManifest(false);
+          setShiprocketOrderIds([]);
+        }
+      }}>
         <DialogContent
           className={`${isMobile ? 'max-w-[95vw] p-4' : 'max-w-md'}`}
         >
           <DialogHeader>
             <DialogTitle className={isMobile ? 'text-lg' : 'text-xl'}>
-              Download Manifest
+              {isShiprocketManifest ? 'Generate Manifest' : 'Download Manifest'}
             </DialogTitle>
             <DialogDescription className={isMobile ? 'text-sm' : ''}>
-              Select a format for your manifest summary
+              {isShiprocketManifest 
+                ? `Select a format for ${shiprocketOrderIds.length} order(s). Processing will begin after format selection.`
+                : 'Select a format for your manifest summary'}
             </DialogDescription>
           </DialogHeader>
 
@@ -6422,6 +6690,7 @@ export function VendorDashboard() {
                     checked={selectedManifestFormat === "a4"}
                     onChange={(e) => setSelectedManifestFormat(e.target.value)}
                     className="w-4 h-4 text-blue-600"
+                    disabled={shiprocketManifestLoading}
                   />
                   <div className="flex-1">
                     <span className="font-semibold block">A4 Format</span>
@@ -6437,6 +6706,7 @@ export function VendorDashboard() {
                     checked={selectedManifestFormat === "thermal"}
                     onChange={(e) => setSelectedManifestFormat(e.target.value)}
                     className="w-4 h-4 text-blue-600"
+                    disabled={shiprocketManifestLoading}
                   />
                   <div className="flex-1">
                     <span className="font-semibold block">Thermal Format (4x6)</span>
@@ -6453,23 +6723,46 @@ export function VendorDashboard() {
               onClick={() => {
                 setShowManifestDialog(false);
                 setManifestDialogData(null);
+                setIsShiprocketManifest(false);
+                setShiprocketOrderIds([]);
               }}
               className={isMobile ? 'w-full' : ''}
+              disabled={shiprocketManifestLoading}
             >
               Cancel
             </Button>
             <Button
               onClick={async () => {
-                if (manifestDialogData) {
+                if (isShiprocketManifest && shiprocketOrderIds.length > 0) {
+                  // Handle Shiprocket manifest generation
+                  // manifestDialogData may contain Shipway manifest IDs to combine
+                  const shipwayIds = manifestDialogData && Array.isArray(manifestDialogData) ? manifestDialogData : null;
+                  await handleShiprocketManifestGeneration(shiprocketOrderIds, selectedManifestFormat, shipwayIds);
+                  setShowManifestDialog(false);
+                  setManifestDialogData(null);
+                  setIsShiprocketManifest(false);
+                  setShiprocketOrderIds([]);
+                } else if (manifestDialogData) {
+                  // Handle Shipway manifest download (only Shipway orders)
                   await downloadManifestSummary(manifestDialogData, selectedManifestFormat);
                   setShowManifestDialog(false);
                   setManifestDialogData(null);
                 }
               }}
               className={`${isMobile ? 'w-full' : ''} bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700`}
+              disabled={shiprocketManifestLoading || (!isShiprocketManifest && !manifestDialogData)}
             >
-              <Download className="w-4 h-4 mr-2" />
-              Download
+              {shiprocketManifestLoading ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                  Generating...
+                </>
+              ) : (
+                <>
+                  <Download className="w-4 h-4 mr-2" />
+                  {isShiprocketManifest ? 'Generate & Download' : 'Download'}
+                </>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

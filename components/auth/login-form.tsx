@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import {
+import { 
   Dialog,
   DialogContent,
   DialogDescription,
@@ -75,7 +75,7 @@ export function LoginForm() {
 
     try {
       const response = await apiClient.resetPassword(resetEmail, oldPassword, newPassword, confirmPassword)
-
+      
       if (response.success) {
         setResetSuccess("Password changed successfully! You can now login with your new password.")
         // Reset form
@@ -133,13 +133,13 @@ export function LoginForm() {
       <Card className="liquidGlass-wrapper w-full rounded-2xl overflow-hidden border-none bg-transparent">
         {/* Liquid Glass Effect Layer with stronger blur */}
         <div className="liquidGlass-effect absolute inset-0 z-0 backdrop-blur-[20px]" style={{ filter: 'url(#glass-distortion)' }} />
-
+        
         {/* Liquid Glass Tint Layer - more transparent */}
         <div className="liquidGlass-tint absolute inset-0 z-[1] bg-white/20" />
-
+        
         {/* Liquid Glass Shine Layer */}
         <div className="liquidGlass-shine absolute inset-0 z-[2]" />
-
+        
         <CardHeader className="space-y-1 sm:space-y-2 relative z-10 pb-4 sm:pb-6 pt-5 sm:pt-8">
           <CardTitle className="text-2xl sm:text-3xl text-center font-bold text-slate-800">
             Sign In
@@ -148,7 +148,7 @@ export function LoginForm() {
             Enter your credentials to access your dashboard
           </CardDescription>
         </CardHeader>
-
+        
         <CardContent className="relative z-10 pb-5 sm:pb-8">
           <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-5 relative">
             <div className="space-y-1.5 sm:space-y-2 autofill-container">
@@ -165,7 +165,7 @@ export function LoginForm() {
                 className="h-10 sm:h-11 bg-white/40 backdrop-blur-md border-white/40 focus:border-blue-400/70 focus:ring-blue-400/20 focus:bg-white/50 transition-all duration-200 shadow-sm text-sm sm:text-base"
               />
             </div>
-
+            
             <div className="space-y-1.5 sm:space-y-2 autofill-container">
               <Label htmlFor="password" className="text-slate-700 font-medium text-sm sm:text-base">Password</Label>
               <div className="relative">
@@ -184,12 +184,8 @@ export function LoginForm() {
                   type="button"
                   variant="ghost"
                   size="sm"
-                  className="absolute right-0 top-0 h-full px-3 py-2 z-10 hover:bg-white/40 rounded-r-md transition-colors select-none"
-                  onMouseDown={() => setShowPassword(true)}
-                  onMouseUp={() => setShowPassword(false)}
-                  onMouseLeave={() => setShowPassword(false)}
-                  onTouchStart={() => setShowPassword(true)}
-                  onTouchEnd={() => setShowPassword(false)}
+                  className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-white/40 rounded-r-md transition-colors"
+                  onClick={() => setShowPassword(!showPassword)}
                   disabled={loading}
                 >
                   {showPassword ? <EyeOff className="h-4 w-4 text-slate-600" /> : <Eye className="h-4 w-4 text-slate-600" />}
@@ -203,9 +199,9 @@ export function LoginForm() {
               </Alert>
             )}
 
-            <Button
-              type="submit"
-              className="w-full h-10 sm:h-11 bg-gradient-to-r from-gray-900 to-gray-800 hover:from-black hover:to-gray-900 text-white font-semibold shadow-lg hover:shadow-xl transform hover:scale-[1.02] transition-all duration-200 text-sm sm:text-base"
+            <Button 
+              type="submit" 
+              className="w-full h-10 sm:h-11 bg-gradient-to-r from-gray-900 to-gray-800 hover:from-black hover:to-gray-900 text-white font-semibold shadow-lg hover:shadow-xl transform hover:scale-[1.02] transition-all duration-200 text-sm sm:text-base" 
               disabled={loading}
             >
               {loading ? (
