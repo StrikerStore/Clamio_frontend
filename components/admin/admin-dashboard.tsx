@@ -1491,8 +1491,12 @@ export function AdminDashboard() {
             });
           }
         } else {
-          // Infinite scroll - append orders
-          setOrders(prev => [...prev, ...ordersData]);
+          // Infinite scroll - append orders (deduplicate by unique_id)
+          setOrders(prev => {
+            const existingIds = new Set(prev.map((o: any) => o.unique_id));
+            const newOrders = ordersData.filter((o: any) => !existingIds.has(o.unique_id));
+            return [...prev, ...newOrders];
+          });
           setIsLoadingMore(false);
 
           // Update pagination
