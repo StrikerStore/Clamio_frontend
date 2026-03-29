@@ -145,13 +145,14 @@ class ApiClient {
   ): Promise<ApiResponse<T>> {
     const authHeader = this.getAuthHeader()
 
+    const { headers: optionHeaders, ...restOptions } = options;
     const config: RequestInit = {
       headers: {
         'Content-Type': 'application/json',
         ...(authHeader && { 'Authorization': authHeader }),
-        ...options.headers,
+        ...optionHeaders,
       },
-      ...options,
+      ...restOptions,
     }
 
     // Retry loop for network resilience

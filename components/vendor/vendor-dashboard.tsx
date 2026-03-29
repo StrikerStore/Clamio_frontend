@@ -205,7 +205,7 @@ export function VendorDashboard() {
   const [ordersError, setOrdersError] = useState("");
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [ordersRefreshing, setOrdersRefreshing] = useState(false);
-  const { submitTask, activeTasks } = useAsyncTask();
+  const { submitTask, activeTasks, isTaskActive } = useAsyncTask();
   // Pagination state for All Orders
   const [allOrdersPage, setAllOrdersPage] = useState(1);
   const [allOrdersHasMore, setAllOrdersHasMore] = useState(true);
@@ -4191,12 +4191,12 @@ export function VendorDashboard() {
               </div>
               <Button
                 onClick={handleRefreshOrders}
-                disabled={ordersRefreshing}
+                disabled={ordersRefreshing || isTaskActive('refresh')}
                 variant="outline"
                 className={`${isMobile ? 'h-8 sm:h-10 text-sm sm:text-base px-2 sm:px-4' : 'h-10'} bg-gradient-to-r from-blue-500 to-blue-600 text-white border-0 hover:from-blue-600 hover:to-blue-700 flex-shrink-0`}
                 size="default"
               >
-                {ordersRefreshing ? (
+                {(ordersRefreshing || isTaskActive('refresh')) ? (
                   <>
                     <div className={`animate-spin rounded-full border-b-2 border-white ${isMobile ? 'h-3 w-3 mr-1 sm:h-4 sm:w-4 sm:mr-2' : 'h-4 w-4 mr-2'}`}></div>
                     {isMobile ? 'Loading' : 'Refreshing...'}
