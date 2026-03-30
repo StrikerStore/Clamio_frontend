@@ -2658,8 +2658,9 @@ export function VendorDashboard() {
       });
     }
 
-    // Ensure unique orders before returning
-    return ensureUniqueOrders(baseOrders, 'order_id');
+    // Ensure unique grouped orders before returning.
+    // Use group_key (account_code|order_id) to avoid collapsing same order_id across stores.
+    return ensureUniqueOrders(baseOrders, 'group_key');
   }
 
   const handleClaimRevenue = async () => {
