@@ -191,6 +191,7 @@ export function VendorDashboard() {
   const [selectedTrackingOrders, setSelectedTrackingOrders] = useState<string[]>([])
   const [bulkMarkReadyLoading, setBulkMarkReadyLoading] = useState(false)
   const [manifestDownloadLoading, setManifestDownloadLoading] = useState<string | null>(null)
+  const [manifestDownloadTargetOrderId, setManifestDownloadTargetOrderId] = useState<string | null>(null)
   const [claimLoading, setClaimLoading] = useState(false)
   const [vendorAddress, setVendorAddress] = useState<null | {
     warehouseId: string
@@ -1735,8 +1736,8 @@ export function VendorDashboard() {
     }
   }
 
-  const downloadManifestSummary = async (manifestIds: string[], format: string = 'a4') => {
-    const manifestKey = manifestIds.join(',');
+  const downloadManifestSummary = async (manifestIds: string[], format: string = 'a4', targetOrderId: string | null = null) => {
+    const manifestKey = targetOrderId || '__bulk__';
     try {
       setManifestDownloadLoading(manifestKey);
 
@@ -1795,6 +1796,7 @@ export function VendorDashboard() {
     }
 
     try {
+      setManifestDownloadTargetOrderId(null);
       // Get filtered orders for handover tab
       const handoverOrders = getFilteredHandoverOrders();
 
@@ -4460,10 +4462,10 @@ export function VendorDashboard() {
                   {!isMobile && activeTab === "handover" && (
                     <Button
                       onClick={handleBulkManifestDownload}
-                      disabled={selectedHandoverOrders.length === 0 || manifestDownloadLoading !== null}
+                      disabled={selectedHandoverOrders.length === 0 || manifestDownloadLoading === '__bulk__'}
                       className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 h-10"
                     >
-                      {manifestDownloadLoading !== null ? (
+                      {manifestDownloadLoading === '__bulk__' ? (
                         <>
                           <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                           Downloading...
@@ -5192,6 +5194,7 @@ export function VendorDashboard() {
                                   e.stopPropagation();
                                   const manifestId = order.manifest_id;
                                   if (manifestId) {
+                                    setManifestDownloadTargetOrderId(order.order_id);
                                     setManifestDialogData([manifestId]);
                                     setShowManifestDialog(true);
                                   } else {
@@ -5202,10 +5205,10 @@ export function VendorDashboard() {
                                     });
                                   }
                                 }}
-                                disabled={order.is_handover === 1 || manifestDownloadLoading === order.manifest_id}
+                                disabled={order.is_handover === 1 || manifestDownloadLoading === order.order_id}
                                 className="flex-1 text-xs h-8 border-green-300 text-green-600 hover:bg-green-50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                               >
-                                {manifestDownloadLoading === order.manifest_id ? (
+                                {manifestDownloadLoading === order.order_id ? (
                                   <>
                                     <Loader2 className="w-3 h-3 mr-1 animate-spin" />
                                     Downloading...
@@ -5375,6 +5378,7 @@ export function VendorDashboard() {
                                       // Get manifest_id from order (should be available in handover tab)
                                       const manifestId = order.manifest_id;
                                       if (manifestId) {
+                                        setManifestDownloadTargetOrderId(order.order_id);
                                         setManifestDialogData([manifestId]);
                                         setShowManifestDialog(true);
                                       } else {
@@ -5385,10 +5389,10 @@ export function VendorDashboard() {
                                         });
                                       }
                                     }}
-                                    disabled={order.is_handover === 1 || manifestDownloadLoading === order.manifest_id}
+                                    disabled={order.is_handover === 1 || manifestDownloadLoading === order.order_id}
                                     className="text-xs px-3 py-1 h-8 border-green-300 text-green-600 hover:bg-green-50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                                   >
-                                    {manifestDownloadLoading === order.manifest_id ? (
+                                    {manifestDownloadLoading === order.order_id ? (
                                       <>
                                         <Loader2 className="w-3 h-3 mr-1 animate-spin" />
                                         Downloading...
@@ -5613,10 +5617,10 @@ export function VendorDashboard() {
                         {/* Bulk Manifest Download Button */}
                         <Button
                           onClick={handleBulkManifestDownload}
-                          disabled={selectedHandoverOrders.length === 0 || manifestDownloadLoading !== null}
+                          disabled={selectedHandoverOrders.length === 0 || manifestDownloadLoading === '__bulk__'}
                           className="flex-1 h-10 sm:h-12 text-sm sm:text-lg font-medium bg-gradient-to-br from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 border-0 shadow-lg min-w-0"
                         >
-                          {manifestDownloadLoading !== null ? (
+                          {manifestDownloadLoading === '__bulk__' ? (
                             <>
                               <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2 flex-shrink-0 animate-spin" />
                               <span className="truncate">{isMobile ? 'Loading' : 'Downloading...'}</span>
@@ -6480,6 +6484,7 @@ export function VendorDashboard() {
               onClick={() => {
                 setShowManifestDialog(false);
                 setManifestDialogData(null);
+                setManifestDownloadTargetOrderId(null);
               }}
               className={isMobile ? 'w-full' : ''}
             >
@@ -6488,9 +6493,10 @@ export function VendorDashboard() {
             <Button
               onClick={async () => {
                 if (manifestDialogData) {
-                  await downloadManifestSummary(manifestDialogData, selectedManifestFormat);
+                  await downloadManifestSummary(manifestDialogData, selectedManifestFormat, manifestDownloadTargetOrderId);
                   setShowManifestDialog(false);
                   setManifestDialogData(null);
+                  setManifestDownloadTargetOrderId(null);
                 }
               }}
               className={`${isMobile ? 'w-full' : ''} bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700`}
