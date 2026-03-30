@@ -1634,6 +1634,11 @@ export function VendorDashboard() {
           )
         );
 
+        // IMPORTANT: do not carry forward any existing "My Orders" selections after claiming.
+        // A claimed order moves into "My Orders" and would otherwise appear checked by default.
+        setSelectedMyOrders([]);
+        setSelectedOrdersForDownload([]);
+
         // Show success message with order_id
         const claimedOrderId = response.data.order_id || unique_id;
         toast({
@@ -3133,7 +3138,12 @@ export function VendorDashboard() {
   const handleBulkDownloadLabels = async (tab: string) => {
     let selectedOrders
     if (tab === "my-orders") {
-      selectedOrders = selectedMyOrders
+      // Avoid sending stale selected order_ids that are no longer present in the current "My Orders" view.
+      const visibleOrders = getFilteredOrdersForTab("my-orders")
+      const selectedSet = new Set(selectedMyOrders)
+      selectedOrders = visibleOrders
+        .filter(o => selectedSet.has(o.order_id))
+        .map(o => o.order_id)
     } else {
       selectedOrders = selectedOrdersForDownload
     }
@@ -3266,6 +3276,11 @@ export function VendorDashboard() {
             }
             // Background refresh for full consistency
             try { await refreshOrders(); } catch (e) { console.log('⚠️ Background refresh after merge failed, but optimistic update is applied'); }
+
+            // IMPORTANT: Async merge path did not clear selections, which could lead to the next
+            // bulk download request accidentally including old orders (and showing failed counts).
+            setSelectedMyOrders([]);
+            setSelectedOrdersForDownload([]);
           },
           (error) => {
             setMergeLoading(false);
@@ -3399,6 +3414,9 @@ export function VendorDashboard() {
 
         // Clear selected orders
         setSelectedUnclaimedOrders([]);
+        // IMPORTANT: do not keep any previous "My Orders" selections after claim.
+        setSelectedMyOrders([]);
+        setSelectedOrdersForDownload([]);
 
         // OPTIMIZATION: Update UI state directly instead of fetching all orders
         // Remove successfully claimed orders from "All Orders" tab
@@ -3829,6 +3847,14 @@ export function VendorDashboard() {
     if (activeTab !== "my-orders") return 0;
     const visibleOrders = getFilteredOrdersForTab("my-orders");
     return visibleOrders.filter(order => selectedMyOrders.includes(order.order_id)).length;
+  };
+
+  // "Select All" helper: checked only if every visible My-Orders row is selected.
+  const isAllMyOrdersSelected = () => {
+    const visibleOrders = getFilteredOrdersForTab("my-orders");
+    if (visibleOrders.length === 0) return false;
+    const selectedSet = new Set(selectedMyOrders);
+    return visibleOrders.every(o => selectedSet.has(o.order_id));
   };
 
   const handleRefreshOrders = async () => {
@@ -4765,11 +4791,12 @@ export function VendorDashboard() {
                               : 'hover:bg-gray-50'
                               }`}
                             onClick={() => {
-                              if (selectedMyOrders.includes(order.order_id)) {
-                                setSelectedMyOrders(selectedMyOrders.filter((id) => id !== order.order_id))
-                              } else {
-                                setSelectedMyOrders([...selectedMyOrders, order.order_id])
-                              }
+                              setSelectedMyOrders((prev) => {
+                                const next = new Set(prev)
+                                if (next.has(order.order_id)) next.delete(order.order_id)
+                                else next.add(order.order_id)
+                                return Array.from(next)
+                              })
                             }}
                           >
 
@@ -4782,11 +4809,12 @@ export function VendorDashboard() {
                                     checked={selectedMyOrders.includes(order.order_id)}
                                     onChange={(e) => {
                                       e.stopPropagation();
-                                      if (e.target.checked) {
-                                        setSelectedMyOrders([...selectedMyOrders, order.order_id])
-                                      } else {
-                                        setSelectedMyOrders(selectedMyOrders.filter((id) => id !== order.order_id))
-                                      }
+                                      setSelectedMyOrders((prev) => {
+                                        const next = new Set(prev)
+                                        if (e.target.checked) next.add(order.order_id)
+                                        else next.delete(order.order_id)
+                                        return Array.from(next)
+                                      })
                                     }}
                                     className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0"
                                     onClick={(e) => e.stopPropagation()}
@@ -4896,15 +4924,13 @@ export function VendorDashboard() {
                                 onChange={(e) => {
                                   const myOrders = getFilteredOrdersForTab("my-orders")
                                   if (e.target.checked) {
-                                    setSelectedMyOrders(myOrders.map((o) => o.order_id))
+                                    // Select only currently visible rows (avoids stale ids causing "random" behavior).
+                                    setSelectedMyOrders([...new Set(myOrders.map((o) => o.order_id))])
                                   } else {
                                     setSelectedMyOrders([])
                                   }
                                 }}
-                                checked={
-                                  selectedMyOrders.length > 0 &&
-                                  selectedMyOrders.length === getFilteredOrdersForTab("my-orders").length
-                                }
+                                checked={isAllMyOrdersSelected()}
                               />
                             </TableHead>
                             <TableHead>Order ID</TableHead>
@@ -4926,11 +4952,12 @@ export function VendorDashboard() {
                                   : 'hover:bg-gray-50'
                                   }`}
                                 onClick={() => {
-                                  if (selectedMyOrders.includes(order.order_id)) {
-                                    setSelectedMyOrders(selectedMyOrders.filter((id) => id !== order.order_id))
-                                  } else {
-                                    setSelectedMyOrders([...selectedMyOrders, order.order_id])
-                                  }
+                                  setSelectedMyOrders((prev) => {
+                                    const next = new Set(prev)
+                                    if (next.has(order.order_id)) next.delete(order.order_id)
+                                    else next.add(order.order_id)
+                                    return Array.from(next)
+                                  })
                                 }}
                               >
                                 <TableCell>
@@ -4939,11 +4966,12 @@ export function VendorDashboard() {
                                     checked={selectedMyOrders.includes(order.order_id)}
                                     onChange={(e) => {
                                       e.stopPropagation();
-                                      if (e.target.checked) {
-                                        setSelectedMyOrders([...selectedMyOrders, order.order_id])
-                                      } else {
-                                        setSelectedMyOrders(selectedMyOrders.filter((id) => id !== order.order_id))
-                                      }
+                                      setSelectedMyOrders((prev) => {
+                                        const next = new Set(prev)
+                                        if (e.target.checked) next.add(order.order_id)
+                                        else next.delete(order.order_id)
+                                        return Array.from(next)
+                                      })
                                     }}
                                     onClick={(e) => e.stopPropagation()}
                                   />
@@ -5465,14 +5493,13 @@ export function VendorDashboard() {
                           onChange={(e) => {
                             const myOrders = getFilteredOrdersForTab("my-orders")
                             if (e.target.checked) {
-                              setSelectedMyOrders(myOrders.map((o) => o.order_id))
+                              setSelectedMyOrders([...new Set(myOrders.map((o) => o.order_id))])
                             } else {
                               setSelectedMyOrders([])
                             }
                           }}
                           checked={
-                            selectedMyOrders.length > 0 &&
-                            selectedMyOrders.length === getFilteredOrdersForTab("my-orders").length
+                            isAllMyOrdersSelected()
                           }
                           className="w-3.5 h-3.5 sm:w-4 sm:h-4"
                         />

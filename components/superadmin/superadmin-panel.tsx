@@ -1393,9 +1393,9 @@ export function SuperAdminPanel() {
                                 )}
                               </div>
                               <div className="grid grid-cols-2 gap-2">
-                                <div>
+                          <div>
                                   <Label className="text-xs">Brand Name *</Label>
-                                  <Input
+                            <Input
                                     value={brand.brand_name}
                                     onChange={(e) => updateNewStoreBrand(idx, 'brand_name', e.target.value)}
                                     placeholder="e.g., Main Store"
@@ -1417,64 +1417,64 @@ export function SuperAdminPanel() {
                                 <Input
                                   value={brand.shopify_store_url}
                                   onChange={(e) => updateNewStoreBrand(idx, 'shopify_store_url', e.target.value)}
-                                  placeholder="https://your-store.myshopify.com"
+                              placeholder="https://your-store.myshopify.com"
                                   className="text-sm"
-                                />
-                              </div>
-                              <div>
+                            />
+                          </div>
+                          <div>
                                 <Label className="text-xs">Shopify Token *</Label>
-                                <div className="relative">
-                                  <Input
+                            <div className="relative">
+                              <Input
                                     type={showShopifyTokens[idx] ? "text" : "password"}
                                     value={brand.shopify_token}
                                     onChange={(e) => updateNewStoreBrand(idx, 'shopify_token', e.target.value)}
-                                    placeholder="Enter Shopify access token"
+                                placeholder="Enter Shopify access token"
                                     className="pr-10 text-sm"
-                                  />
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                                    onClick={() => setShowShopifyTokens(prev => ({ ...prev, [idx]: !prev[idx] }))}
-                                  >
-                                    {showShopifyTokens[idx] ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                                  </Button>
-                                </div>
-                              </div>
+                              />
                               <Button
                                 type="button"
-                                variant="outline"
+                                variant="ghost"
                                 size="sm"
+                                className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                                    onClick={() => setShowShopifyTokens(prev => ({ ...prev, [idx]: !prev[idx] }))}
+                              >
+                                    {showShopifyTokens[idx] ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                              </Button>
+                            </div>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
                                 className="w-full text-xs"
                                 onClick={() => handleTestShopify(brand.shopify_store_url, brand.shopify_token, idx)}
                                 disabled={testingConnection.loading && testingConnection.type === 'shopify' && testingConnection.brandIndex === idx}
-                              >
+                          >
                                 {testingConnection.loading && testingConnection.type === 'shopify' && testingConnection.brandIndex === idx ? (
-                                  <>
-                                    <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-gray-600 mr-2"></div>
-                                    Testing...
-                                  </>
-                                ) : (
-                                  <>
-                                    <CheckCircle className="w-3 h-3 mr-2" />
-                                    Test Shopify Connection
-                                  </>
-                                )}
-                              </Button>
+                              <>
+                                <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-gray-600 mr-2"></div>
+                                Testing...
+                              </>
+                            ) : (
+                              <>
+                                <CheckCircle className="w-3 h-3 mr-2" />
+                                Test Shopify Connection
+                              </>
+                            )}
+                          </Button>
                               {shopifyTestResults[idx] && (
                                 <div className={`text-xs mt-1 p-2 rounded-md flex items-start gap-2 ${shopifyTestResults[idx].success
-                                  ? 'bg-green-50 text-green-800 border border-green-200'
-                                  : 'bg-red-50 text-red-800 border border-red-200'
-                                  }`}>
+                              ? 'bg-green-50 text-green-800 border border-green-200'
+                              : 'bg-red-50 text-red-800 border border-red-200'
+                              }`}>
                                   {shopifyTestResults[idx].success ? (
                                     <CheckCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-green-600" />
-                                  ) : (
+                              ) : (
                                     <XCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-red-600" />
-                                  )}
-                                  <span className="flex-1">{shopifyTestResults[idx].message}</span>
-                                </div>
                               )}
+                                  <span className="flex-1">{shopifyTestResults[idx].message}</span>
+                            </div>
+                          )}
                             </div>
                           ))}
                         </div>
@@ -2107,9 +2107,9 @@ export function SuperAdminPanel() {
                       )}
                     </div>
                     <div className="grid grid-cols-2 gap-2">
-                      <div>
+                <div>
                         <Label className="text-xs">Brand Name *</Label>
-                        <Input
+                  <Input
                           value={brand.brand_name}
                           onChange={(e) => updateEditingStoreBrand(idx, 'brand_name', e.target.value)}
                           placeholder="e.g., Main Store"
@@ -2131,64 +2131,64 @@ export function SuperAdminPanel() {
                       <Input
                         value={brand.shopify_store_url}
                         onChange={(e) => updateEditingStoreBrand(idx, 'shopify_store_url', e.target.value)}
-                        placeholder="https://your-store.myshopify.com"
+                    placeholder="https://your-store.myshopify.com"
                         className="text-sm"
-                      />
-                    </div>
-                    <div>
+                  />
+                </div>
+                <div>
                       <Label className="text-xs">Shopify Token {brand.id ? '(leave blank to keep current)' : '*'}</Label>
-                      <div className="relative">
-                        <Input
+                  <div className="relative">
+                    <Input
                           type={showShopifyTokens[idx] ? "text" : "password"}
                           value={brand.shopify_token}
                           onChange={(e) => updateEditingStoreBrand(idx, 'shopify_token', e.target.value)}
                           placeholder={brand.id ? "Enter new token or leave blank" : "Enter Shopify access token"}
                           className="pr-10 text-sm"
-                        />
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                          onClick={() => setShowShopifyTokens(prev => ({ ...prev, [idx]: !prev[idx] }))}
-                        >
-                          {showShopifyTokens[idx] ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                        </Button>
-                      </div>
-                    </div>
+                    />
                     <Button
                       type="button"
-                      variant="outline"
+                      variant="ghost"
                       size="sm"
+                      className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                          onClick={() => setShowShopifyTokens(prev => ({ ...prev, [idx]: !prev[idx] }))}
+                    >
+                          {showShopifyTokens[idx] ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                    </Button>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
                       className="w-full text-xs"
                       onClick={() => handleTestShopify(brand.shopify_store_url, brand.shopify_token, idx)}
                       disabled={testingConnection.loading && testingConnection.type === 'shopify' && testingConnection.brandIndex === idx}
-                    >
+                >
                       {testingConnection.loading && testingConnection.type === 'shopify' && testingConnection.brandIndex === idx ? (
-                        <>
-                          <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-gray-600 mr-2"></div>
-                          Testing...
-                        </>
-                      ) : (
-                        <>
-                          <CheckCircle className="w-3 h-3 mr-2" />
-                          Test Shopify Connection
-                        </>
-                      )}
-                    </Button>
+                    <>
+                      <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-gray-600 mr-2"></div>
+                      Testing...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle className="w-3 h-3 mr-2" />
+                      Test Shopify Connection
+                    </>
+                  )}
+                </Button>
                     {shopifyTestResults[idx] && (
                       <div className={`text-xs mt-1 p-2 rounded-md flex items-start gap-2 ${shopifyTestResults[idx].success
-                        ? 'bg-green-50 text-green-800 border border-green-200'
-                        : 'bg-red-50 text-red-800 border border-red-200'
-                        }`}>
+                    ? 'bg-green-50 text-green-800 border border-green-200'
+                    : 'bg-red-50 text-red-800 border border-red-200'
+                    }`}>
                         {shopifyTestResults[idx].success ? (
                           <CheckCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-green-600" />
-                        ) : (
+                    ) : (
                           <XCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-red-600" />
-                        )}
-                        <span className="flex-1">{shopifyTestResults[idx].message}</span>
-                      </div>
                     )}
+                        <span className="flex-1">{shopifyTestResults[idx].message}</span>
+                  </div>
+                )}
                   </div>
                 ))}
               </div>
