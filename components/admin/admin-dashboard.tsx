@@ -72,6 +72,7 @@ import {
 } from "lucide-react"
 import { useAuth } from "@/components/auth/auth-provider"
 import { useToast } from "@/hooks/use-toast"
+import { useAsyncTask } from "@/hooks/useAsyncTask"
 import { apiClient } from "@/lib/api"
 import { useEffect, useMemo, useRef, useCallback } from "react"
 import { useDeviceType } from "@/hooks/use-mobile"
@@ -192,6 +193,7 @@ const mockSettlements = [
 export function AdminDashboard() {
   const { user, logout, authHeader } = useAuth()
   const { toast } = useToast()
+  const { submitTask, isTaskActive } = useAsyncTask()
   const [activeTab, setActiveTab] = useState("orders")
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState<string[]>([])
@@ -247,6 +249,7 @@ export function AdminDashboard() {
   // Orders state
   const [orders, setOrders] = useState<any[]>([])
   const [ordersLoading, setOrdersLoading] = useState(false)
+  const [ordersRefreshing, setOrdersRefreshing] = useState(false)
   const [ordersStats, setOrdersStats] = useState({
     totalOrders: 0,
     claimedOrders: 0,
@@ -1315,6 +1318,7 @@ export function AdminDashboard() {
   const fetchOrders = async (
     resetPagination: boolean = true,
     syncFromShipway: boolean = false,
+    keepVisibleDuringRefresh: boolean = false,
     filters?: {
       search?: string,
       dateFrom?: string,
@@ -1346,7 +1350,7 @@ export function AdminDashboard() {
         // Refresh in background silently (with or without Shipway sync)
         setTimeout(async () => {
           try {
-            await fetchOrdersFromAPI(resetPagination, syncFromShipway, filters, true);
+            await fetchOrdersFromAPI(resetPagination, syncFromShipway, filters, true, keepVisibleDuringRefresh);
           } catch (error) {
             console.error('Background refresh error:', error);
           }
@@ -1356,7 +1360,7 @@ export function AdminDashboard() {
     }
 
     // No cache or infinite scroll - fetch from API
-    await fetchOrdersFromAPI(resetPagination, syncFromShipway, filters, false);
+    await fetchOrdersFromAPI(resetPagination, syncFromShipway, filters, false, keepVisibleDuringRefresh);
   };
 
   // Internal function to fetch orders from API
@@ -1372,11 +1376,17 @@ export function AdminDashboard() {
       store?: string,
       showInactiveStores?: boolean
     },
-    silentRefresh: boolean = false
+    silentRefresh: boolean = false,
+    keepVisibleDuringRefresh: boolean = false
   ) => {
     if (!silentRefresh) {
       if (resetPagination) {
-        setOrdersLoading(true);
+        if (keepVisibleDuringRefresh && orders.length > 0) {
+          // Background-style refresh: keep visible rows while fetching new data.
+          setOrdersRefreshing(true);
+        } else {
+          setOrdersLoading(true);
+        }
         setCurrentPage(1);
       } else {
         setIsLoadingMore(true);
@@ -1387,23 +1397,29 @@ export function AdminDashboard() {
       // If syncFromShipway is true, sync orders from Shipway first
       if (syncFromShipway) {
         try {
-          const syncResponse = await apiClient.refreshAdminOrders();
+          // Use async mode to avoid long request timeout / retry loops on frontend.
+          const syncResponse = await apiClient.refreshAdminOrders(true);
+
+          if ((syncResponse as any).async && (syncResponse as any).taskId) {
+            await new Promise<void>((resolve, reject) => {
+              submitTask(
+                async () => syncResponse as any,
+                'admin-refresh',
+                {},
+                () => resolve(),
+                (error) => reject(new Error(error))
+              ).catch(reject);
+            });
+          } else if (!syncResponse.success) {
+            throw new Error(syncResponse.message || "Orders sync completed with warnings");
+          }
+
           if (!silentRefresh) {
-            // Only show toast if not a silent background refresh
-            if (syncResponse.success) {
-              toast({
-                title: "Orders Synced",
-                description: syncResponse.message || "Orders have been synced from Shipway successfully",
-              });
-            } else {
-              toast({
-                title: "Sync Warning",
-                description: syncResponse.message || "Orders sync completed with warnings",
-                variant: "default",
-              });
-            }
+            toast({
+              title: "Orders Synced",
+              description: "Orders have been synced from Shipway successfully",
+            });
           } else {
-            // Silent refresh - just log to console
             console.log('✅ Silently synced orders from Shipway');
           }
         } catch (syncError) {
@@ -1453,7 +1469,9 @@ export function AdminDashboard() {
           // Display data immediately (or update silently if background refresh)
           if (!silentRefresh) {
             setOrders(ordersData);
-            setOrdersLoading(false);
+            if (!keepVisibleDuringRefresh) {
+              setOrdersLoading(false);
+            }
           } else {
             // Silent background refresh - update cache and state
             setOrders(ordersData);
@@ -1527,9 +1545,16 @@ export function AdminDashboard() {
     } finally {
       if (!silentRefresh) {
         setOrdersLoading(false);
+        setOrdersRefreshing(false);
         setIsLoadingMore(false);
       }
     }
+  };
+
+  // Manual refresh action: bypass cache and keep visible orders while syncing/fetching.
+  const handleRefreshOrders = async () => {
+    if (ordersLoading || ordersRefreshing) return;
+    await fetchOrdersFromAPI(true, true, undefined, false, true);
   };
 
   const scrollToTop = () => {
@@ -2704,13 +2729,13 @@ export function AdminDashboard() {
                 {!isMobile && <CardDescription className="text-sm sm:text-base truncate">Manage orders, vendors, and carriers</CardDescription>}
               </div>
               <Button
-                onClick={() => fetchOrders(true, true)}
-                disabled={ordersLoading}
+                onClick={handleRefreshOrders}
+                disabled={ordersLoading || ordersRefreshing || isTaskActive('admin-refresh')}
                 variant="outline"
                 className={`${isMobile ? 'h-8 sm:h-10 text-sm sm:text-base px-2 sm:px-4' : 'h-10'} bg-gradient-to-r from-blue-500 to-blue-600 text-white border-0 hover:from-blue-600 hover:to-blue-700 flex-shrink-0`}
                 size="default"
               >
-                {ordersLoading ? (
+                {(ordersLoading || ordersRefreshing || isTaskActive('admin-refresh')) ? (
                   <>
                     <div className={`animate-spin rounded-full border-b-2 border-white ${isMobile ? 'h-3 w-3 mr-1 sm:h-4 sm:w-4 sm:mr-2' : 'h-4 w-4 mr-2'}`}></div>
                     {isMobile ? 'Loading' : 'Refreshing...'}
@@ -3970,7 +3995,7 @@ export function AdminDashboard() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {ordersLoading ? (
+                          {ordersLoading && orders.length === 0 ? (
                             <TableRow>
                               <TableCell colSpan={10} className="text-center py-8">
                                 Loading orders...
@@ -4111,7 +4136,7 @@ export function AdminDashboard() {
                       </Table>
                     ) : (
                       <div className="space-y-2.5 sm:space-y-3">
-                        {ordersLoading ? (
+                        {ordersLoading && orders.length === 0 ? (
                           <Card className="p-4 text-center">Loading orders...</Card>
                         ) : (
                           getFilteredOrdersForTab("orders").map((order: any, index) => (

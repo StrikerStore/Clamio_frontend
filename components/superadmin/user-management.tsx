@@ -155,22 +155,31 @@ export function UserManagement() {
   const [editingStore, setEditingStore] = useState<any>(null)
   const [isDeleteStoreConfirmOpen, setIsDeleteStoreConfirmOpen] = useState(false)
   const [storeToDelete, setStoreToDelete] = useState<any>(null)
+  const emptyShopifyBrand = { brand_name: "", store_code: "", shopify_store_url: "", shopify_token: "" }
   const [newStore, setNewStore] = useState({
     store_name: "",
     shipping_partner: "",
     username: "",
     password: "",
-    shopify_store_url: "",
-    shopify_token: "",
+    shopify_brands: [{ brand_name: "", store_code: "", shopify_store_url: "", shopify_token: "" }],
     status: "active" as "active" | "inactive"
   })
   const [shippingPartners, setShippingPartners] = useState<string[]>([])
   const [showPassword, setShowPassword] = useState(false)
-  const [showShopifyToken, setShowShopifyToken] = useState(false)
-  const [testingConnection, setTestingConnection] = useState<{ type: 'shipway' | 'shopify' | null, loading: boolean }>({ type: null, loading: false })
+  const [showShopifyTokens, setShowShopifyTokens] = useState<Record<number, boolean>>({})
+  const [testingConnection, setTestingConnection] = useState<{ type: 'shipway' | 'shopify' | null, loading: boolean, brandIndex?: number }>({ type: null, loading: false })
   const [shipwayTestResult, setShipwayTestResult] = useState<{ success: boolean; message: string } | null>(null)
-  const [shopifyTestResult, setShopifyTestResult] = useState<{ success: boolean; message: string } | null>(null)
+  const [shopifyTestResults, setShopifyTestResults] = useState<Record<number, { success: boolean; message: string }>>({})
   const [isAddingStore, setIsAddingStore] = useState(false)
+
+  const normalizeShippingPartners = (data: unknown): string[] => {
+    if (!Array.isArray(data)) return []
+    const parts = data
+      .flatMap((p) => String(p).split(","))
+      .map((p) => p.trim())
+      .filter(Boolean)
+    return Array.from(new Set(parts))
+  }
 
   // Warehouse Mapping state
   const [whMappings, setWhMappings] = useState<any[]>([])
@@ -248,8 +257,8 @@ export function UserManagement() {
   const fetchShippingPartners = async () => {
     try {
       const response = await apiClient.getShippingPartners()
-      if (response.success && Array.isArray(response.data)) {
-        setShippingPartners(response.data)
+      if (response.success) {
+        setShippingPartners(normalizeShippingPartners(response.data))
       }
     } catch (error) {
       console.error('Failed to fetch shipping partners:', error)
@@ -624,10 +633,18 @@ export function UserManagement() {
   }
 
   const handleAddStore = async () => {
-    if (!newStore.store_name || !newStore.shipping_partner || !newStore.username || !newStore.password ||
-      !newStore.shopify_store_url || !newStore.shopify_token) {
+    if (!newStore.store_name || !newStore.shipping_partner || !newStore.username || !newStore.password) {
       setError("Please fill in all required fields")
       return
+    }
+
+    // Validate Shopify brands
+    for (let i = 0; i < newStore.shopify_brands.length; i++) {
+      const brand = newStore.shopify_brands[i]
+      if (!brand.brand_name || !brand.store_code || !brand.shopify_store_url || !brand.shopify_token) {
+        setError(`Shopify Brand #${i + 1}: All fields are required (Brand Name, Store Code, URL, Token)`)
+        return
+      }
     }
 
     setIsAddingStore(true)
@@ -640,12 +657,11 @@ export function UserManagement() {
           shipping_partner: "",
           username: "",
           password: "",
-          shopify_store_url: "",
-          shopify_token: "",
+          shopify_brands: [{ ...emptyShopifyBrand }],
           status: "active"
         })
         setShipwayTestResult(null)
-        setShopifyTestResult(null)
+        setShopifyTestResults({})
         setIsAddStoreOpen(false)
         fetchStores()
       } else {
@@ -663,13 +679,19 @@ export function UserManagement() {
     setSuccess("")
     setEditingStore({
       ...store,
-      password: store.password || '',
-      shopify_token: store.shopify_token || '',
-      shopify_store_url: store.shopify_store_url || '',
+      password: '',
       username: store.username || '',
       store_name: store.store_name || '',
-      status: store.status || 'active'
+      status: store.status || 'active',
+      shopify_brands: store.shopify_brands?.map((b: any) => ({
+        id: b.id,
+        brand_name: b.brand_name || '',
+        store_code: b.store_code || '1',
+        shopify_store_url: b.shopify_store_url || '',
+        shopify_token: ''
+      })) || [{ ...emptyShopifyBrand }]
     })
+    setShopifyTestResults({})
     setIsEditStoreOpen(true)
   }
 
@@ -679,10 +701,24 @@ export function UserManagement() {
 
     if (!editingStore) return
 
-    if (!editingStore.store_name || !editingStore.username ||
-      !editingStore.shopify_store_url || !editingStore.shopify_token) {
+    if (!editingStore.store_name || !editingStore.username) {
       setError("Please fill in all required fields")
       return
+    }
+
+    // Validate Shopify brands
+    if (editingStore.shopify_brands) {
+      for (let i = 0; i < editingStore.shopify_brands.length; i++) {
+        const brand = editingStore.shopify_brands[i]
+        if (!brand.brand_name || !brand.store_code || !brand.shopify_store_url) {
+          setError(`Shopify Brand #${i + 1}: Brand Name, Store Code and URL are required`)
+          return
+        }
+        if (!brand.id && !brand.shopify_token) {
+          setError(`Shopify Brand #${i + 1}: Shopify Token is required for new brands`)
+          return
+        }
+      }
     }
 
     setError("")
@@ -693,9 +729,8 @@ export function UserManagement() {
       const updateData: any = {
         store_name: editingStore.store_name,
         username: editingStore.username,
-        shopify_store_url: editingStore.shopify_store_url,
-        shopify_token: editingStore.shopify_token,
-        status: editingStore.status
+        status: editingStore.status,
+        shopify_brands: editingStore.shopify_brands
       }
 
       if (editingStore.password && editingStore.password.trim() !== '') {
@@ -708,6 +743,7 @@ export function UserManagement() {
         setTimeout(() => {
           setIsEditStoreOpen(false)
           setEditingStore(null)
+          setShopifyTestResults({})
           setError("")
           setSuccess("")
           fetchStores()
@@ -787,25 +823,24 @@ export function UserManagement() {
     }
   }
 
-  const handleTestShopify = async (url: string, token: string) => {
+  const handleTestShopify = async (url: string, token: string, brandIndex: number = 0) => {
     if (!url || !token) {
-      setShopifyTestResult({ success: false, message: "Please enter Shopify store URL and token" })
+      setShopifyTestResults(prev => ({ ...prev, [brandIndex]: { success: false, message: "Please enter Shopify store URL and token" } }))
       return
     }
 
-    setTestingConnection({ type: 'shopify', loading: true })
-    setShopifyTestResult(null) // Clear previous result
+    setTestingConnection({ type: 'shopify', loading: true, brandIndex })
+    setShopifyTestResults(prev => { const next = { ...prev }; delete next[brandIndex]; return next; })
     try {
       const response = await apiClient.testShopifyConnection({ shopify_store_url: url, shopify_token: token })
       if (response.success) {
-        setShopifyTestResult({ success: true, message: response.message || "Connection successful! Credentials are valid." })
+        setShopifyTestResults(prev => ({ ...prev, [brandIndex]: { success: true, message: response.message || "Connection successful! Credentials are valid." } }))
         setSuccess("Shopify credentials are valid")
       } else {
-        setShopifyTestResult({ success: false, message: response.message || "Invalid Shopify credentials" })
+        setShopifyTestResults(prev => ({ ...prev, [brandIndex]: { success: false, message: response.message || "Invalid Shopify credentials" } }))
         setError(response.message || "Invalid Shopify credentials")
       }
     } catch (error: any) {
-      // Extract error message from various possible error formats
       let errorMessage = "Failed to test Shopify connection"
       if (error?.message) {
         errorMessage = error.message
@@ -814,11 +849,42 @@ export function UserManagement() {
       } else if (typeof error === 'string') {
         errorMessage = error
       }
-      setShopifyTestResult({ success: false, message: errorMessage })
+      setShopifyTestResults(prev => ({ ...prev, [brandIndex]: { success: false, message: errorMessage } }))
       setError(errorMessage)
     } finally {
       setTestingConnection({ type: null, loading: false })
     }
+  }
+
+  // Helper: update a shopify brand in newStore state
+  const updateNewStoreBrand = (index: number, field: string, value: string) => {
+    const brands = [...newStore.shopify_brands]
+    brands[index] = { ...brands[index], [field]: value }
+    setNewStore({ ...newStore, shopify_brands: brands })
+  }
+  const addNewStoreBrand = () => {
+    setNewStore({ ...newStore, shopify_brands: [...newStore.shopify_brands, { ...emptyShopifyBrand }] })
+  }
+  const removeNewStoreBrand = (index: number) => {
+    if (newStore.shopify_brands.length <= 1) return
+    const brands = newStore.shopify_brands.filter((_, i) => i !== index)
+    setNewStore({ ...newStore, shopify_brands: brands })
+    const newResults = { ...shopifyTestResults }; delete newResults[index]; setShopifyTestResults(newResults)
+  }
+  const updateEditingStoreBrand = (index: number, field: string, value: string) => {
+    if (!editingStore) return
+    const brands = [...editingStore.shopify_brands]
+    brands[index] = { ...brands[index], [field]: value }
+    setEditingStore({ ...editingStore, shopify_brands: brands })
+  }
+  const addEditingStoreBrand = () => {
+    if (!editingStore) return
+    setEditingStore({ ...editingStore, shopify_brands: [...editingStore.shopify_brands, { ...emptyShopifyBrand }] })
+  }
+  const removeEditingStoreBrand = (index: number) => {
+    if (!editingStore || editingStore.shopify_brands.length <= 1) return
+    const brands = editingStore.shopify_brands.filter((_: any, i: number) => i !== index)
+    setEditingStore({ ...editingStore, shopify_brands: brands })
   }
 
   // Warehouse Mapping functions
@@ -1343,7 +1409,7 @@ export function UserManagement() {
                           onValueChange={(value) => {
                             setNewStore({ ...newStore, shipping_partner: value, username: "", password: "" })
                             setShipwayTestResult(null)
-                            setShopifyTestResult(null)
+                            setShopifyTestResults({})
                           }}
                         >
                           <SelectTrigger>
@@ -1429,72 +1495,122 @@ export function UserManagement() {
                         </div>
                       )}
 
-                      <div className="space-y-2">
-                        <Label className="text-sm font-semibold">Shopify Credentials</Label>
-                        <div>
-                          <Label htmlFor="shopify-url">Shopify Store URL *</Label>
-                          <Input
-                            id="shopify-url"
-                            value={newStore.shopify_store_url}
-                            onChange={(e) => setNewStore({ ...newStore, shopify_store_url: e.target.value })}
-                            placeholder="https://your-store.myshopify.com"
-                          />
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-sm font-semibold">Shopify Brands</Label>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={addNewStoreBrand}
+                            className="text-xs"
+                          >
+                            <Plus className="w-3 h-3 mr-1" />
+                            Add Shopify Brand
+                          </Button>
                         </div>
-                        <div>
-                          <Label htmlFor="shopify-token">Shopify Token *</Label>
-                          <div className="relative">
-                            <Input
-                              id="shopify-token"
-                              type={showShopifyToken ? "text" : "password"}
-                              value={newStore.shopify_token}
-                              onChange={(e) => setNewStore({ ...newStore, shopify_token: e.target.value })}
-                              placeholder="Enter Shopify access token"
-                              className="pr-10"
-                            />
+                        
+                        {newStore.shopify_brands.map((brand, idx) => (
+                          <div key={idx} className="border rounded-lg p-3 space-y-2 relative bg-gray-50/50">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-medium text-gray-500">Shopify Brand #{idx + 1}</span>
+                              {newStore.shopify_brands.length > 1 && (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 w-6 p-0 text-red-500 hover:text-red-700"
+                                  onClick={() => removeNewStoreBrand(idx)}
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </Button>
+                              )}
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <Label className="text-xs">Brand Name *</Label>
+                                <Input
+                                  value={brand.brand_name}
+                                  onChange={(e) => updateNewStoreBrand(idx, 'brand_name', e.target.value)}
+                                  placeholder="e.g., Main Store"
+                                  className="text-sm"
+                                />
+                              </div>
+                              <div>
+                                <Label className="text-xs">Store Code *</Label>
+                                <Input
+                                  value={brand.store_code}
+                                  onChange={(e) => updateNewStoreBrand(idx, 'store_code', e.target.value)}
+                                  placeholder="e.g., 1"
+                                  className="text-sm"
+                                />
+                              </div>
+                            </div>
+                            <div>
+                              <Label className="text-xs">Shopify Store URL *</Label>
+                              <Input
+                                value={brand.shopify_store_url}
+                                onChange={(e) => updateNewStoreBrand(idx, 'shopify_store_url', e.target.value)}
+                                placeholder="https://your-store.myshopify.com"
+                                className="text-sm"
+                              />
+                            </div>
+                            <div>
+                              <Label className="text-xs">Shopify Token *</Label>
+                              <div className="relative">
+                                <Input
+                                  type={showShopifyTokens[idx] ? "text" : "password"}
+                                  value={brand.shopify_token}
+                                  onChange={(e) => updateNewStoreBrand(idx, 'shopify_token', e.target.value)}
+                                  placeholder="Enter Shopify access token"
+                                  className="pr-10 text-sm"
+                                />
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                                  onClick={() => setShowShopifyTokens(prev => ({ ...prev, [idx]: !prev[idx] }))}
+                                >
+                                  {showShopifyTokens[idx] ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                                </Button>
+                              </div>
+                            </div>
                             <Button
                               type="button"
-                              variant="ghost"
+                              variant="outline"
                               size="sm"
-                              className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                              onClick={() => setShowShopifyToken(!showShopifyToken)}
+                              className="w-full text-xs"
+                              onClick={() => handleTestShopify(brand.shopify_store_url, brand.shopify_token, idx)}
+                              disabled={testingConnection.loading && testingConnection.type === 'shopify' && testingConnection.brandIndex === idx}
                             >
-                              {showShopifyToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                              {testingConnection.loading && testingConnection.type === 'shopify' && testingConnection.brandIndex === idx ? (
+                                <>
+                                  <Loader2 className="w-3 h-3 mr-2 animate-spin" />
+                                  Testing...
+                                </>
+                              ) : (
+                                <>
+                                  <CheckCircle className="w-3 h-3 mr-2" />
+                                  Test Shopify Connection
+                                </>
+                              )}
                             </Button>
-                          </div>
-                        </div>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="w-full"
-                          onClick={() => handleTestShopify(newStore.shopify_store_url, newStore.shopify_token)}
-                          disabled={testingConnection.loading && testingConnection.type === 'shopify'}
-                        >
-                          {testingConnection.loading && testingConnection.type === 'shopify' ? (
-                            <>
-                              <Loader2 className="w-3 h-3 mr-2 animate-spin" />
-                              Testing...
-                            </>
-                          ) : (
-                            <>
-                              <CheckCircle className="w-3 h-3 mr-2" />
-                              Test Shopify Connection
-                            </>
-                          )}
-                        </Button>
-                        {shopifyTestResult && (
-                          <div className={`text-sm mt-2 p-2 rounded-md flex items-start gap-2 ${shopifyTestResult.success
-                            ? 'bg-green-50 text-green-800 border border-green-200'
-                            : 'bg-red-50 text-red-800 border border-red-200'
-                            }`}>
-                            {shopifyTestResult.success ? (
-                              <CheckCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-green-600" />
-                            ) : (
-                              <XCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-red-600" />
+                            {shopifyTestResults[idx] && (
+                              <div className={`text-xs mt-1 p-2 rounded-md flex items-start gap-2 ${shopifyTestResults[idx].success
+                                ? 'bg-green-50 text-green-800 border border-green-200'
+                                : 'bg-red-50 text-red-800 border border-red-200'
+                                }`}>
+                                {shopifyTestResults[idx].success ? (
+                                  <CheckCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-green-600" />
+                                ) : (
+                                  <XCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-red-600" />
+                                )}
+                                <span className="flex-1">{shopifyTestResults[idx].message}</span>
+                              </div>
                             )}
-                            <span className="flex-1">{shopifyTestResult.message}</span>
                           </div>
-                        )}
+                        ))}
                       </div>
 
                       <div>
@@ -1666,7 +1782,7 @@ export function UserManagement() {
                         </div>
                         <div className="text-xs text-gray-500 space-y-1">
                           <p>Shipway: {store.username}</p>
-                          <p className="truncate">Shopify: {store.shopify_store_url || 'N/A'}</p>
+                          <p>Shopify Brands: {store.shopify_brands?.length || 0}</p>
                           {store.last_synced_at && <p>Last synced: {new Date(store.last_synced_at).toLocaleDateString()}</p>}
                         </div>
                       </div>
@@ -2292,59 +2408,124 @@ export function UserManagement() {
                   </Button>
                 </div>
 
-                <div className="space-y-2">
-                  <Label className="text-sm font-semibold">Shopify Credentials</Label>
-                  <div>
-                    <Label htmlFor="edit-shopify-url-mobile">Shopify Store URL *</Label>
-                    <Input
-                      id="edit-shopify-url-mobile"
-                      value={editingStore.shopify_store_url || ''}
-                      onChange={(e) => setEditingStore({ ...editingStore, shopify_store_url: e.target.value })}
-                      placeholder="https://your-store.myshopify.com"
-                    />
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-sm font-semibold">Shopify Brands</Label>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={addEditingStoreBrand}
+                      className="text-xs"
+                    >
+                      <Plus className="w-3 h-3 mr-1" />
+                      Add Shopify Brand
+                    </Button>
                   </div>
-                  <div>
-                    <Label htmlFor="edit-shopify-token-mobile">Shopify Token *</Label>
-                    <div className="relative">
-                      <Input
-                        id="edit-shopify-token-mobile"
-                        type={showShopifyToken ? "text" : "password"}
-                        value={editingStore.shopify_token || ''}
-                        onChange={(e) => setEditingStore({ ...editingStore, shopify_token: e.target.value })}
-                        placeholder="Enter Shopify access token"
-                        className="pr-10"
-                      />
+                  
+                  {editingStore.shopify_brands?.map((brand: any, idx: number) => (
+                    <div key={idx} className="border rounded-lg p-3 space-y-2 relative bg-gray-50/50">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium text-gray-500">
+                          Shopify Brand #{idx + 1} {brand.id ? `(ID: ${brand.id})` : '(New)'}
+                        </span>
+                        {editingStore.shopify_brands.length > 1 && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0 text-red-500 hover:text-red-700"
+                            onClick={() => removeEditingStoreBrand(idx)}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <Label className="text-xs">Brand Name *</Label>
+                          <Input
+                            value={brand.brand_name}
+                            onChange={(e) => updateEditingStoreBrand(idx, 'brand_name', e.target.value)}
+                            placeholder="e.g., Main Store"
+                            className="text-sm"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs">Store Code *</Label>
+                          <Input
+                            value={brand.store_code}
+                            onChange={(e) => updateEditingStoreBrand(idx, 'store_code', e.target.value)}
+                            placeholder="e.g., 1"
+                            className="text-sm"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <Label className="text-xs">Shopify Store URL *</Label>
+                        <Input
+                          value={brand.shopify_store_url}
+                          onChange={(e) => updateEditingStoreBrand(idx, 'shopify_store_url', e.target.value)}
+                          placeholder="https://your-store.myshopify.com"
+                          className="text-sm"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Shopify Token {brand.id ? '(leave blank to keep current)' : '*'}</Label>
+                        <div className="relative">
+                          <Input
+                            type={showShopifyTokens[idx] ? "text" : "password"}
+                            value={brand.shopify_token}
+                            onChange={(e) => updateEditingStoreBrand(idx, 'shopify_token', e.target.value)}
+                            placeholder={brand.id ? "Enter new token or leave blank" : "Enter Shopify access token"}
+                            className="pr-10 text-sm"
+                          />
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                            onClick={() => setShowShopifyTokens(prev => ({ ...prev, [idx]: !prev[idx] }))}
+                          >
+                            {showShopifyTokens[idx] ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                          </Button>
+                        </div>
+                      </div>
                       <Button
                         type="button"
-                        variant="ghost"
+                        variant="outline"
                         size="sm"
-                        className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                        onClick={() => setShowShopifyToken(!showShopifyToken)}
+                        className="w-full text-xs"
+                        onClick={() => handleTestShopify(brand.shopify_store_url, brand.shopify_token, idx)}
+                        disabled={testingConnection.loading && testingConnection.type === 'shopify' && testingConnection.brandIndex === idx}
                       >
-                        {showShopifyToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        {testingConnection.loading && testingConnection.type === 'shopify' && testingConnection.brandIndex === idx ? (
+                          <>
+                            <Loader2 className="w-3 h-3 mr-2 animate-spin" />
+                            Testing...
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle className="w-3 h-3 mr-2" />
+                            Test Shopify Connection
+                          </>
+                        )}
                       </Button>
+                      {shopifyTestResults[idx] && (
+                        <div className={`text-xs mt-1 p-2 rounded-md flex items-start gap-2 ${shopifyTestResults[idx].success
+                          ? 'bg-green-50 text-green-800 border border-green-200'
+                          : 'bg-red-50 text-red-800 border border-red-200'
+                          }`}>
+                          {shopifyTestResults[idx].success ? (
+                            <CheckCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-green-600" />
+                          ) : (
+                            <XCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-red-600" />
+                          )}
+                          <span className="flex-1">{shopifyTestResults[idx].message}</span>
+                        </div>
+                      )}
                     </div>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="w-full"
-                    onClick={() => handleTestShopify(editingStore.shopify_store_url || '', editingStore.shopify_token || '')}
-                    disabled={testingConnection.loading && testingConnection.type === 'shopify'}
-                  >
-                    {testingConnection.loading && testingConnection.type === 'shopify' ? (
-                      <>
-                        <Loader2 className="w-3 h-3 mr-2 animate-spin" />
-                        Testing...
-                      </>
-                    ) : (
-                      <>
-                        <CheckCircle className="w-3 h-3 mr-2" />
-                        Test Shopify Connection
-                      </>
-                    )}
-                  </Button>
+                  ))}
                 </div>
 
                 <div>
@@ -3162,72 +3343,122 @@ export function UserManagement() {
                             </div>
                           )}
 
-                          <div className="space-y-2">
-                            <Label className="text-sm font-semibold">Shopify Credentials</Label>
-                            <div>
-                              <Label htmlFor="shopify-url">Shopify Store URL *</Label>
-                              <Input
-                                id="shopify-url"
-                                value={newStore.shopify_store_url}
-                                onChange={(e) => setNewStore({ ...newStore, shopify_store_url: e.target.value })}
-                                placeholder="https://your-store.myshopify.com"
-                              />
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between">
+                              <Label className="text-sm font-semibold">Shopify Brands</Label>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={addNewStoreBrand}
+                                className="text-xs"
+                              >
+                                <Plus className="w-3 h-3 mr-1" />
+                                Add Shopify Brand
+                              </Button>
                             </div>
-                            <div>
-                              <Label htmlFor="shopify-token">Shopify Token *</Label>
-                              <div className="relative">
-                                <Input
-                                  id="shopify-token"
-                                  type={showShopifyToken ? "text" : "password"}
-                                  value={newStore.shopify_token}
-                                  onChange={(e) => setNewStore({ ...newStore, shopify_token: e.target.value })}
-                                  placeholder="Enter Shopify access token"
-                                  className="pr-10"
-                                />
+                            
+                            {newStore.shopify_brands.map((brand, idx) => (
+                              <div key={idx} className="border rounded-lg p-3 space-y-2 relative bg-gray-50/50">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs font-medium text-gray-500">Shopify Brand #{idx + 1}</span>
+                                  {newStore.shopify_brands.length > 1 && (
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-6 w-6 p-0 text-red-500 hover:text-red-700"
+                                      onClick={() => removeNewStoreBrand(idx)}
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </Button>
+                                  )}
+                                </div>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div>
+                                    <Label className="text-xs">Brand Name *</Label>
+                                    <Input
+                                      value={brand.brand_name}
+                                      onChange={(e) => updateNewStoreBrand(idx, 'brand_name', e.target.value)}
+                                      placeholder="e.g., Main Store"
+                                      className="text-sm"
+                                    />
+                                  </div>
+                                  <div>
+                                    <Label className="text-xs">Store Code *</Label>
+                                    <Input
+                                      value={brand.store_code}
+                                      onChange={(e) => updateNewStoreBrand(idx, 'store_code', e.target.value)}
+                                      placeholder="e.g., 1"
+                                      className="text-sm"
+                                    />
+                                  </div>
+                                </div>
+                                <div>
+                                  <Label className="text-xs">Shopify Store URL *</Label>
+                                  <Input
+                                    value={brand.shopify_store_url}
+                                    onChange={(e) => updateNewStoreBrand(idx, 'shopify_store_url', e.target.value)}
+                                    placeholder="https://your-store.myshopify.com"
+                                    className="text-sm"
+                                  />
+                                </div>
+                                <div>
+                                  <Label className="text-xs">Shopify Token *</Label>
+                                  <div className="relative">
+                                    <Input
+                                      type={showShopifyTokens[idx] ? "text" : "password"}
+                                      value={brand.shopify_token}
+                                      onChange={(e) => updateNewStoreBrand(idx, 'shopify_token', e.target.value)}
+                                      placeholder="Enter Shopify access token"
+                                      className="pr-10 text-sm"
+                                    />
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                                      onClick={() => setShowShopifyTokens(prev => ({ ...prev, [idx]: !prev[idx] }))}
+                                    >
+                                      {showShopifyTokens[idx] ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                                    </Button>
+                                  </div>
+                                </div>
                                 <Button
                                   type="button"
-                                  variant="ghost"
+                                  variant="outline"
                                   size="sm"
-                                  className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                                  onClick={() => setShowShopifyToken(!showShopifyToken)}
+                                  className="w-full text-xs"
+                                  onClick={() => handleTestShopify(brand.shopify_store_url, brand.shopify_token, idx)}
+                                  disabled={testingConnection.loading && testingConnection.type === 'shopify' && testingConnection.brandIndex === idx}
                                 >
-                                  {showShopifyToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                  {testingConnection.loading && testingConnection.type === 'shopify' && testingConnection.brandIndex === idx ? (
+                                    <>
+                                      <Loader2 className="w-3 h-3 mr-2 animate-spin" />
+                                      Testing...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <CheckCircle className="w-3 h-3 mr-2" />
+                                      Test Shopify Connection
+                                    </>
+                                  )}
                                 </Button>
-                              </div>
-                            </div>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="w-full"
-                              onClick={() => handleTestShopify(newStore.shopify_store_url, newStore.shopify_token)}
-                              disabled={testingConnection.loading && testingConnection.type === 'shopify'}
-                            >
-                              {testingConnection.loading && testingConnection.type === 'shopify' ? (
-                                <>
-                                  <Loader2 className="w-3 h-3 mr-2 animate-spin" />
-                                  Testing...
-                                </>
-                              ) : (
-                                <>
-                                  <CheckCircle className="w-3 h-3 mr-2" />
-                                  Test Shopify Connection
-                                </>
-                              )}
-                            </Button>
-                            {shopifyTestResult && (
-                              <div className={`text-sm mt-2 p-2 rounded-md flex items-start gap-2 ${shopifyTestResult.success
-                                ? 'bg-green-50 text-green-800 border border-green-200'
-                                : 'bg-red-50 text-red-800 border border-red-200'
-                                }`}>
-                                {shopifyTestResult.success ? (
-                                  <CheckCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-green-600" />
-                                ) : (
-                                  <XCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-red-600" />
+                                {shopifyTestResults[idx] && (
+                                  <div className={`text-xs mt-1 p-2 rounded-md flex items-start gap-2 ${shopifyTestResults[idx].success
+                                    ? 'bg-green-50 text-green-800 border border-green-200'
+                                    : 'bg-red-50 text-red-800 border border-red-200'
+                                    }`}>
+                                    {shopifyTestResults[idx].success ? (
+                                      <CheckCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-green-600" />
+                                    ) : (
+                                      <XCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-red-600" />
+                                    )}
+                                    <span className="flex-1">{shopifyTestResults[idx].message}</span>
+                                  </div>
                                 )}
-                                <span className="flex-1">{shopifyTestResult.message}</span>
                               </div>
-                            )}
+                            ))}
                           </div>
 
                           <div>
@@ -3290,7 +3521,7 @@ export function UserManagement() {
                               <TableHead>Store Name</TableHead>
                               <TableHead>Account Code</TableHead>
                               <TableHead>Username</TableHead>
-                              <TableHead>Shopify URL</TableHead>
+                              <TableHead>Shopify Brands</TableHead>
                               <TableHead>Status</TableHead>
                               <TableHead>Last Synced</TableHead>
                               <TableHead>Actions</TableHead>
@@ -3302,8 +3533,19 @@ export function UserManagement() {
                                 <TableCell className="font-medium">{store.store_name}</TableCell>
                                 <TableCell className="font-mono text-xs">{store.account_code}</TableCell>
                                 <TableCell>{store.username}</TableCell>
-                                <TableCell className="max-w-[200px] truncate">
-                                  {store.shopify_store_url || 'N/A'}
+                                <TableCell className="max-w-[200px]">
+                                  {store.shopify_brands && store.shopify_brands.length > 0 ? (
+                                    <div className="space-y-0.5">
+                                      {store.shopify_brands.map((b: any, i: number) => (
+                                        <div key={i} className="text-xs">
+                                          <span className="font-medium">{b.brand_name}</span>
+                                          <span className="text-gray-400 ml-1">(#{b.store_code})</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <span className="text-gray-400 text-xs">No brands</span>
+                                  )}
                                 </TableCell>
                                 <TableCell>
                                   <Badge
@@ -3995,59 +4237,124 @@ export function UserManagement() {
                 </Button>
               </div>
 
-              <div className="space-y-2">
-                <Label className="text-sm font-semibold">Shopify Credentials</Label>
-                <div>
-                  <Label htmlFor="edit-shopify-url">Shopify Store URL *</Label>
-                  <Input
-                    id="edit-shopify-url"
-                    value={editingStore.shopify_store_url || ''}
-                    onChange={(e) => setEditingStore({ ...editingStore, shopify_store_url: e.target.value })}
-                    placeholder="https://your-store.myshopify.com"
-                  />
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <Label className="text-sm font-semibold">Shopify Brands</Label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={addEditingStoreBrand}
+                    className="text-xs"
+                  >
+                    <Plus className="w-3 h-3 mr-1" />
+                    Add Shopify Brand
+                  </Button>
                 </div>
-                <div>
-                  <Label htmlFor="edit-shopify-token">Shopify Token *</Label>
-                  <div className="relative">
-                    <Input
-                      id="edit-shopify-token"
-                      type={showShopifyToken ? "text" : "password"}
-                      value={editingStore.shopify_token || ''}
-                      onChange={(e) => setEditingStore({ ...editingStore, shopify_token: e.target.value })}
-                      placeholder="Enter Shopify access token"
-                      className="pr-10"
-                    />
+                
+                {editingStore.shopify_brands?.map((brand: any, idx: number) => (
+                  <div key={idx} className="border rounded-lg p-3 space-y-2 relative bg-gray-50/50">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-medium text-gray-500">
+                        Shopify Brand #{idx + 1} {brand.id ? `(ID: ${brand.id})` : '(New)'}
+                      </span>
+                      {editingStore.shopify_brands.length > 1 && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0 text-red-500 hover:text-red-700"
+                          onClick={() => removeEditingStoreBrand(idx)}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </Button>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <Label className="text-xs">Brand Name *</Label>
+                        <Input
+                          value={brand.brand_name}
+                          onChange={(e) => updateEditingStoreBrand(idx, 'brand_name', e.target.value)}
+                          placeholder="e.g., Main Store"
+                          className="text-sm"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Store Code *</Label>
+                        <Input
+                          value={brand.store_code}
+                          onChange={(e) => updateEditingStoreBrand(idx, 'store_code', e.target.value)}
+                          placeholder="e.g., 1"
+                          className="text-sm"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <Label className="text-xs">Shopify Store URL *</Label>
+                      <Input
+                        value={brand.shopify_store_url}
+                        onChange={(e) => updateEditingStoreBrand(idx, 'shopify_store_url', e.target.value)}
+                        placeholder="https://your-store.myshopify.com"
+                        className="text-sm"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Shopify Token {brand.id ? '(leave blank to keep current)' : '*'}</Label>
+                      <div className="relative">
+                        <Input
+                          type={showShopifyTokens[idx] ? "text" : "password"}
+                          value={brand.shopify_token}
+                          onChange={(e) => updateEditingStoreBrand(idx, 'shopify_token', e.target.value)}
+                          placeholder={brand.id ? "Enter new token or leave blank" : "Enter Shopify access token"}
+                          className="pr-10 text-sm"
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                          onClick={() => setShowShopifyTokens(prev => ({ ...prev, [idx]: !prev[idx] }))}
+                        >
+                          {showShopifyTokens[idx] ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                        </Button>
+                      </div>
+                    </div>
                     <Button
                       type="button"
-                      variant="ghost"
+                      variant="outline"
                       size="sm"
-                      className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                      onClick={() => setShowShopifyToken(!showShopifyToken)}
+                      className="w-full text-xs"
+                      onClick={() => handleTestShopify(brand.shopify_store_url, brand.shopify_token, idx)}
+                      disabled={testingConnection.loading && testingConnection.type === 'shopify' && testingConnection.brandIndex === idx}
                     >
-                      {showShopifyToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      {testingConnection.loading && testingConnection.type === 'shopify' && testingConnection.brandIndex === idx ? (
+                        <>
+                          <Loader2 className="w-3 h-3 mr-2 animate-spin" />
+                          Testing...
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle className="w-3 h-3 mr-2" />
+                          Test Shopify Connection
+                        </>
+                      )}
                     </Button>
+                    {shopifyTestResults[idx] && (
+                      <div className={`text-xs mt-1 p-2 rounded-md flex items-start gap-2 ${shopifyTestResults[idx].success
+                        ? 'bg-green-50 text-green-800 border border-green-200'
+                        : 'bg-red-50 text-red-800 border border-red-200'
+                        }`}>
+                        {shopifyTestResults[idx].success ? (
+                          <CheckCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-green-600" />
+                        ) : (
+                          <XCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-red-600" />
+                        )}
+                        <span className="flex-1">{shopifyTestResults[idx].message}</span>
+                      </div>
+                    )}
                   </div>
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="w-full"
-                  onClick={() => handleTestShopify(editingStore.shopify_store_url || '', editingStore.shopify_token || '')}
-                  disabled={testingConnection.loading && testingConnection.type === 'shopify'}
-                >
-                  {testingConnection.loading && testingConnection.type === 'shopify' ? (
-                    <>
-                      <Loader2 className="w-3 h-3 mr-2 animate-spin" />
-                      Testing...
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle className="w-3 h-3 mr-2" />
-                      Test Shopify Connection
-                    </>
-                  )}
-                </Button>
+                ))}
               </div>
 
               <div>

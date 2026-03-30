@@ -1210,8 +1210,12 @@ class ApiClient {
     shipping_partner: string
     username: string
     password: string
-    shopify_store_url: string
-    shopify_token: string
+    shopify_brands: Array<{
+      brand_name: string
+      store_code: string
+      shopify_store_url: string
+      shopify_token: string
+    }>
     status: 'active' | 'inactive'
   }): Promise<ApiResponse> {
     return this.makeRequest('/stores', {
@@ -1224,8 +1228,13 @@ class ApiClient {
     store_name?: string
     username?: string
     password?: string
-    shopify_store_url?: string
-    shopify_token?: string
+    shopify_brands?: Array<{
+      id?: number
+      brand_name: string
+      store_code: string
+      shopify_store_url: string
+      shopify_token: string
+    }>
     status?: 'active' | 'inactive'
   }): Promise<ApiResponse> {
     return this.makeRequest(`/stores/${accountCode}`, {
