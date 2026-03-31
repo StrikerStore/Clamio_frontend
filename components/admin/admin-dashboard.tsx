@@ -1484,9 +1484,7 @@ export function AdminDashboard() {
           if (pagination) {
             setHasMore(pagination.hasMore || false);
             setTotalCount(pagination.total || 0);
-            if (!silentRefresh) {
-              setCurrentPage(2); // Next page will be 2 (only reset for non-silent loads)
-            }
+            setCurrentPage(2); // Next page will be 2
           }
 
           // For initial/filtered load, fetch full page (50 orders) in background
