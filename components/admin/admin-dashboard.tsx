@@ -195,7 +195,9 @@ export function AdminDashboard() {
   const { toast } = useToast()
   const { submitTask, isTaskActive } = useAsyncTask()
   const [activeTab, setActiveTab] = useState("orders")
-  const [searchTerm, setSearchTerm] = useState("")
+  const [orderSearchTerm, setOrderSearchTerm] = useState("")
+  const [vendorSearchTerm, setVendorSearchTerm] = useState("")
+  const [carrierSearchTerm, setCarrierSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState<string[]>([])
   const [dateFrom, setDateFrom] = useState<Date | undefined>(undefined)
   const [dateTo, setDateTo] = useState<Date | undefined>(undefined)
@@ -670,10 +672,10 @@ export function AdminDashboard() {
     const result = orders.filter((order) => {
       // Search filter (for immediate UI update, backend also filters)
       const matchesSearch =
-        order.order_id?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        order.customer_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        order.vendor_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        order.product_name?.toLowerCase().includes(searchTerm.toLowerCase())
+        order.order_id?.toLowerCase().includes(orderSearchTerm.toLowerCase()) ||
+        order.customer_name?.toLowerCase().includes(orderSearchTerm.toLowerCase()) ||
+        order.vendor_name?.toLowerCase().includes(orderSearchTerm.toLowerCase()) ||
+        order.product_name?.toLowerCase().includes(orderSearchTerm.toLowerCase())
 
       // Status filter (for immediate UI update, backend also filters)
       const matchesStatus = statusFilter.length === 0 || statusFilter.includes(order.status)
@@ -706,7 +708,7 @@ export function AdminDashboard() {
 
     console.log(`📊 Filtered ${result.length} orders out of ${orders.length} total (vendor/store filtered on backend)`)
     return result
-  }, [orders, searchTerm, statusFilter, dateFrom, dateTo, showInactiveStoreOrders])
+  }, [orders, orderSearchTerm, statusFilter, dateFrom, dateTo, showInactiveStoreOrders])
 
   // Wrapper function for compatibility with existing code
   const getFilteredOrdersForTab = useCallback((tab: string) => {
@@ -738,14 +740,14 @@ export function AdminDashboard() {
   // Check if any filters are active
   const hasActiveFilters = useMemo(() => {
     return !!(
-      searchTerm ||
+      orderSearchTerm ||
       statusFilter.length > 0 ||
       selectedVendorFilters.length > 0 ||
       selectedStoreFilters.length > 0 ||
       dateFrom ||
       dateTo
     )
-  }, [searchTerm, statusFilter, selectedVendorFilters, selectedStoreFilters, dateFrom, dateTo])
+  }, [orderSearchTerm, statusFilter, selectedVendorFilters, selectedStoreFilters, dateFrom, dateTo])
 
   // Always use backend stats (now includes filtered counts when filters are applied)
   const displayStats = dashboardStats
@@ -767,8 +769,8 @@ export function AdminDashboard() {
   const getFilteredVendors = () => {
     return vendors.filter((vendor) => {
       const matchesSearch =
-        vendor.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        vendor.email?.toLowerCase().includes(searchTerm.toLowerCase())
+        vendor.name?.toLowerCase().includes(vendorSearchTerm.toLowerCase()) ||
+        vendor.email?.toLowerCase().includes(vendorSearchTerm.toLowerCase())
       const matchesStatus = statusFilter.length === 0 || statusFilter.includes(vendor.status)
       return matchesSearch && matchesStatus
     })
@@ -782,8 +784,8 @@ export function AdminDashboard() {
 
     let filtered = carriers.filter((carrier) => {
       const matchesSearch =
-        carrier.carrier_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        carrier.carrier_id?.toLowerCase().includes(searchTerm.toLowerCase())
+        carrier.carrier_name?.toLowerCase().includes(carrierSearchTerm.toLowerCase()) ||
+        carrier.carrier_id?.toLowerCase().includes(carrierSearchTerm.toLowerCase())
       const carrierStatus = (carrier.status || '').toString().trim().toLowerCase()
       const matchesStatus = statusFilter.length === 0 || statusFilter.some(s => s.toLowerCase() === carrierStatus)
 
@@ -1715,7 +1717,7 @@ export function AdminDashboard() {
           showInactiveStores: showInactiveStoreOrders
         };
 
-        if (searchTerm) backendFilters.search = searchTerm;
+        if (orderSearchTerm) backendFilters.search = orderSearchTerm;
         if (statusFilter.length > 0) backendFilters.status = statusFilter; // Send array of statuses
         if (dateFrom) backendFilters.dateFrom = dateFrom.toISOString().split('T')[0];
         if (dateTo) backendFilters.dateTo = dateTo.toISOString().split('T')[0];
@@ -1772,7 +1774,7 @@ export function AdminDashboard() {
     }, 500); // 500ms debounce for search
 
     return () => clearTimeout(timeoutId);
-  }, [searchTerm, statusFilter, dateFrom, dateTo, showInactiveStoreOrders, hasActiveFilters, selectedVendorFilters, selectedStoreFilters]);
+  }, [orderSearchTerm, statusFilter, dateFrom, dateTo, showInactiveStoreOrders, hasActiveFilters, selectedVendorFilters, selectedStoreFilters]);
 
   // Infinite scroll handler
   const handleScroll = useCallback(() => {
@@ -1788,7 +1790,7 @@ export function AdminDashboard() {
       const currentFilters: any = {
         showInactiveStores: showInactiveStoreOrders
       };
-      if (searchTerm) currentFilters.search = searchTerm;
+      if (orderSearchTerm) currentFilters.search = orderSearchTerm;
       if (statusFilter.length > 0) currentFilters.status = statusFilter; // Send array of statuses
       if (dateFrom) currentFilters.dateFrom = dateFrom.toISOString().split('T')[0];
       if (dateTo) currentFilters.dateTo = dateTo.toISOString().split('T')[0];
@@ -1817,7 +1819,7 @@ export function AdminDashboard() {
 
       fetchOrders(false, false, currentFilters);
     }
-  }, [activeTab, hasMore, ordersLoading, isLoadingMore, currentPage, showInactiveStoreOrders, searchTerm, statusFilter, dateFrom, dateTo, selectedVendorFilters, selectedStoreFilters, vendors]);
+  }, [activeTab, hasMore, ordersLoading, isLoadingMore, currentPage, showInactiveStoreOrders, orderSearchTerm, statusFilter, dateFrom, dateTo, selectedVendorFilters, selectedStoreFilters, vendors]);
 
   // Attach window scroll listener for infinite scroll
   useEffect(() => {
@@ -2786,14 +2788,14 @@ export function AdminDashboard() {
                             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                             <Input
                               placeholder="Search carrier..."
-                              value={searchTerm}
-                              onChange={(e) => setSearchTerm(e.target.value)}
+                              value={carrierSearchTerm}
+                              onChange={(e) => setCarrierSearchTerm(e.target.value)}
                               className="pl-10 pr-10"
-                              id="admin-search-input"
+                              id="admin-carrier-search-input"
                             />
-                            {searchTerm && (
+                            {carrierSearchTerm && (
                               <button
-                                onClick={() => setSearchTerm('')}
+                                onClick={() => setCarrierSearchTerm('')}
                                 className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
                                 type="button"
                                 title="Clear"
@@ -2963,14 +2965,14 @@ export function AdminDashboard() {
                             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                             <Input
                               placeholder="Search vendors..."
-                              value={searchTerm}
-                              onChange={(e) => setSearchTerm(e.target.value)}
+                              value={vendorSearchTerm}
+                              onChange={(e) => setVendorSearchTerm(e.target.value)}
                               className="pl-10 pr-10"
-                              id="admin-search-input"
+                              id="admin-vendor-search-input"
                             />
-                            {searchTerm && (
+                            {vendorSearchTerm && (
                               <button
-                                onClick={() => setSearchTerm('')}
+                                onClick={() => setVendorSearchTerm('')}
                                 className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
                                 type="button"
                                 title="Clear"
@@ -3080,12 +3082,23 @@ export function AdminDashboard() {
                             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                             <Input
                               placeholder={`Search ${activeTab}...`}
-                              value={searchTerm}
-                              onChange={(e) => setSearchTerm(e.target.value)}
-                              className={`pl-10 ${searchTerm && isMobile ? 'pr-20' : 'pr-10'}`}
+                              value={
+                                activeTab === 'orders' ? orderSearchTerm
+                                : activeTab === 'vendors' ? vendorSearchTerm
+                                : carrierSearchTerm
+                              }
+                              onChange={(e) => {
+                                if (activeTab === 'orders') setOrderSearchTerm(e.target.value);
+                                else if (activeTab === 'vendors') setVendorSearchTerm(e.target.value);
+                                else setCarrierSearchTerm(e.target.value);
+                              }}
+                              className={`pl-10 ${
+                                (activeTab === 'orders' ? orderSearchTerm : activeTab === 'vendors' ? vendorSearchTerm : carrierSearchTerm)
+                                && isMobile ? 'pr-20' : 'pr-10'
+                              }`}
                               id="admin-search-input"
                             />
-                            {searchTerm && isMobile && (
+                            {(activeTab === 'orders' ? orderSearchTerm : activeTab === 'vendors' ? vendorSearchTerm : carrierSearchTerm) && isMobile && (
                               <button
                                 onClick={() => {
                                   document.getElementById('admin-search-input')?.blur();
@@ -3097,9 +3110,13 @@ export function AdminDashboard() {
                                 <CheckCircle className="w-4 h-4" />
                               </button>
                             )}
-                            {searchTerm && (
+                            {(activeTab === 'orders' ? orderSearchTerm : activeTab === 'vendors' ? vendorSearchTerm : carrierSearchTerm) && (
                               <button
-                                onClick={() => setSearchTerm('')}
+                                onClick={() => {
+                                  if (activeTab === 'orders') setOrderSearchTerm('');
+                                  else if (activeTab === 'vendors') setVendorSearchTerm('');
+                                  else setCarrierSearchTerm('');
+                                }}
                                 className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
                                 type="button"
                                 title="Clear"
