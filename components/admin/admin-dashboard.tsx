@@ -1614,7 +1614,7 @@ export function AdminDashboard() {
     console.log('🚀 Starting parallel load: dashboard stats + orders + vendor stats...');
     // On initial load, only show active store orders (matching default frontend state)
     fetchDashboardStats({ showInactiveStores: false }); // Load stats for cards - active stores only
-    fetchOrders(true, false, { showInactiveStores: false }); // Load first 20 orders - active stores only
+    fetchOrders(true, false, false, { showInactiveStores: false }); // Load first 20 orders - active stores only
     fetchVendorStats(); // Load vendor counts only (lightweight)
     fetchStores(); // Fetch stores first for carrier filtering
     // Note: Full vendor data (fetchVendors) is lazy-loaded when Vendors tab is opened
@@ -1634,7 +1634,7 @@ export function AdminDashboard() {
       console.log('🔄 showInactiveStoreOrders changed, refetching stats and orders...');
       // Bypass cache to get fresh stats when toggling inactive stores filter
       fetchDashboardStats({ showInactiveStores: showInactiveStoreOrders }, false, true);
-      fetchOrders(true, false, { showInactiveStores: showInactiveStoreOrders });
+      fetchOrders(true, false, false, { showInactiveStores: showInactiveStoreOrders });
     }
   }, [showInactiveStoreOrders]);
 
@@ -1764,12 +1764,12 @@ export function AdminDashboard() {
 
         // Fetch filtered stats and orders from backend
         fetchDashboardStats(backendFilters);
-        fetchOrders(true, false, backendFilters);
+        fetchOrders(true, false, false, backendFilters);
       } else {
         // No filters active - but still respect showInactiveStoreOrders toggle
         console.log('🔄 Filters cleared, resetting to initial state...');
         fetchDashboardStats({ showInactiveStores: showInactiveStoreOrders });
-        fetchOrders(true, false, { showInactiveStores: showInactiveStoreOrders });
+        fetchOrders(true, false, false, { showInactiveStores: showInactiveStoreOrders });
       }
     }, 500); // 500ms debounce for search
 
@@ -1817,7 +1817,7 @@ export function AdminDashboard() {
         currentFilters.store = selectedStoreFilters;
       }
 
-      fetchOrders(false, false, currentFilters);
+      fetchOrders(false, false, false, currentFilters);
     }
   }, [activeTab, hasMore, ordersLoading, isLoadingMore, currentPage, showInactiveStoreOrders, orderSearchTerm, statusFilter, dateFrom, dateTo, selectedVendorFilters, selectedStoreFilters, vendors]);
 
