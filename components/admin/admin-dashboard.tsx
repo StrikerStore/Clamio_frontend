@@ -1332,7 +1332,7 @@ export function AdminDashboard() {
     }
   ) => {
     // Generate cache key
-    const pageToFetch = resetPagination ? 1 : Math.floor(loadedOrdersCount / 50) + 1;
+    const pageToFetch = resetPagination ? 1 : currentPage;
     const cacheKey = generateCacheKey('orders', filters || {}, pageToFetch);
 
     // Check cache first (only for reset pagination, not for infinite scroll)
@@ -1437,7 +1437,7 @@ export function AdminDashboard() {
       }
 
       // Calculate page to fetch based on unique orders loaded (not rows)
-      const pageToFetch = resetPagination ? 1 : Math.floor(loadedOrdersCount / 50) + 1;
+      const pageToFetch = resetPagination ? 1 : currentPage;
 
       // OPTIMIZATION: Progressive loading based on scenario
       // - Initial load (no filters): 20 orders → 50 orders
