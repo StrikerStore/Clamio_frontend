@@ -387,6 +387,8 @@ export function AdminDashboard() {
   const settlementsCacheRef = useRef<Map<string, CacheEntry>>(new Map())
   const notificationsCacheRef = useRef<Map<string, CacheEntry>>(new Map())
   const dashboardStatsCacheRef = useRef<Map<string, CacheEntry>>(new Map())
+  const ordersScrollSentinelRef = useRef<HTMLDivElement>(null)
+  const fetchMoreRef = useRef<(() => void) | null>(null)
 
   // Helper function to generate cache key from filters
   const generateCacheKey = (tab: string, filters: any, page?: number): string => {
@@ -1484,7 +1486,9 @@ export function AdminDashboard() {
           if (pagination) {
             setHasMore(pagination.hasMore || false);
             setTotalCount(pagination.total || 0);
-            setCurrentPage(2); // Next page will be 2
+            if (!silentRefresh) {
+              setCurrentPage(2); // Next page will be 2 (only reset for non-silent loads)
+            }
           }
 
           // For initial/filtered load, fetch full page (50 orders) in background
@@ -1512,17 +1516,25 @@ export function AdminDashboard() {
           }
         } else {
           // Infinite scroll - append orders (deduplicate by unique_id)
+          // Compute new orders and accumulated count before setting state so we have the correct count.
+          const existingIds = new Set(orders.map((o: any) => o.unique_id));
+          const newUniqueOrders = ordersData.filter((o: any) => !existingIds.has(o.unique_id));
+          const newAccumulatedCount = orders.length + newUniqueOrders.length;
           setOrders(prev => {
-            const existingIds = new Set(prev.map((o: any) => o.unique_id));
-            const newOrders = ordersData.filter((o: any) => !existingIds.has(o.unique_id));
-            return [...prev, ...newOrders];
+            // Re-deduplicate against latest prev to be safe against any edge cases
+            const prevIds = new Set(prev.map((o: any) => o.unique_id));
+            return [...prev, ...ordersData.filter((o: any) => !prevIds.has(o.unique_id))];
           });
           setIsLoadingMore(false);
 
           // Update pagination
           if (pagination) {
-            setHasMore(pagination.hasMore || false);
-            setTotalCount(pagination.total || 0);
+            const total = pagination.total || 0;
+            // Fix: derive hasMore from accumulated unique order count vs total unique orders.
+            // The backend's pagination.hasMore is based on raw SQL row count (unreliable due to JOINs),
+            // while pagination.total uses COUNT(DISTINCT unique_id) which is accurate.
+            setHasMore(newAccumulatedCount < total);
+            setTotalCount(total);
             setCurrentPage(prev => prev + 1);
           }
         }
@@ -1776,26 +1788,18 @@ export function AdminDashboard() {
     return () => clearTimeout(timeoutId);
   }, [orderSearchTerm, statusFilter, dateFrom, dateTo, showInactiveStoreOrders, hasActiveFilters, selectedVendorFilters, selectedStoreFilters]);
 
-  // Infinite scroll handler
-  const handleScroll = useCallback(() => {
-    // Use window scrolling
-    const scrolledToBottom =
-      window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 200;
-
-    // Only trigger if on orders tab, scrolled to bottom, has more data, and not currently loading
-    if (activeTab === 'orders' && scrolledToBottom && hasMore && !ordersLoading && !isLoadingMore) {
-      console.log('📜 Infinite scroll triggered - loading more admin orders...');
-
-      // Build current filter state for pagination
-      const currentFilters: any = {
-        showInactiveStores: showInactiveStoreOrders
-      };
+  // Keep fetchMoreRef current with latest state/filters. Observer reads it at callback time.
+  useEffect(() => {
+    if (activeTab !== 'orders' || !hasMore || ordersLoading || isLoadingMore) {
+      fetchMoreRef.current = null;
+      return;
+    }
+    fetchMoreRef.current = () => {
+      const currentFilters: any = { showInactiveStores: showInactiveStoreOrders };
       if (orderSearchTerm) currentFilters.search = orderSearchTerm;
-      if (statusFilter.length > 0) currentFilters.status = statusFilter; // Send array of statuses
+      if (statusFilter.length > 0) currentFilters.status = statusFilter;
       if (dateFrom) currentFilters.dateFrom = dateFrom.toISOString().split('T')[0];
       if (dateTo) currentFilters.dateTo = dateTo.toISOString().split('T')[0];
-
-      // Include vendor and store filters for pagination
       if (selectedVendorFilters.length > 0) {
         const vendorWarehouseIds: string[] = [];
         selectedVendorFilters.forEach(vendorName => {
@@ -1808,26 +1812,31 @@ export function AdminDashboard() {
             }
           }
         });
-        if (vendorWarehouseIds.length > 0) {
-          currentFilters.vendor = vendorWarehouseIds;
-        }
+        if (vendorWarehouseIds.length > 0) currentFilters.vendor = vendorWarehouseIds;
       }
-
-      if (selectedStoreFilters.length > 0) {
-        currentFilters.store = selectedStoreFilters;
-      }
-
+      if (selectedStoreFilters.length > 0) currentFilters.store = selectedStoreFilters;
       fetchOrders(false, false, false, currentFilters);
-    }
-  }, [activeTab, hasMore, ordersLoading, isLoadingMore, currentPage, showInactiveStoreOrders, orderSearchTerm, statusFilter, dateFrom, dateTo, selectedVendorFilters, selectedStoreFilters, vendors]);
-
-  // Attach window scroll listener for infinite scroll
-  useEffect(() => {
-    window.addEventListener('scroll', handleScroll);
-    return () => {
-      window.removeEventListener('scroll', handleScroll);
     };
-  }, [handleScroll]);
+  }, [activeTab, hasMore, ordersLoading, isLoadingMore, showInactiveStoreOrders, orderSearchTerm, statusFilter, dateFrom, dateTo, selectedVendorFilters, selectedStoreFilters, vendors]);
+
+  // Create the IntersectionObserver ONCE at mount.
+  // It reads fetchMoreRef.current at callback time, so it always uses fresh state
+  // without being recreated on every state change (which caused rapid-fire API calls).
+  useEffect(() => {
+    const sentinel = ordersScrollSentinelRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && fetchMoreRef.current) {
+          console.log('📜 Infinite scroll triggered - loading more admin orders...');
+          fetchMoreRef.current();
+        }
+      },
+      { threshold: 0.1 }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, []); // Empty deps — created only once, uses ref for all dynamic state
 
   // Note: Removed automatic order refresh on:
   // - Window visibility change (was causing frequent refreshes)
@@ -3977,7 +3986,7 @@ export function AdminDashboard() {
               {/* Scrollable Content Section */}
               <div className={isMobile ? "" : ""}>
                 <TabsContent value="orders" className="mt-0">
-                  <div className={`rounded-md border ${!isMobile ? 'overflow-y-auto max-h-[600px]' : ''}`}>
+                  <div className="rounded-md border">
                     {!isMobile ? (
                       <Table className="text-xs">
                         <TableHeader className="sticky top-0 bg-white z-30 shadow-sm border-b">
@@ -4321,6 +4330,9 @@ export function AdminDashboard() {
                       </div>
                     </div>
                   )}
+
+                  {/* Sentinel element: IntersectionObserver watches this to trigger next page load */}
+                  <div ref={ordersScrollSentinelRef} className="h-1" />
                 </TabsContent>
 
                 <TabsContent value="vendors" className="mt-0">
