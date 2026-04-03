@@ -4014,6 +4014,7 @@ export function AdminDashboard() {
                             <TableHead className="text-xs">Store</TableHead>
                             <TableHead className="text-xs">Product</TableHead>
                             <TableHead className="text-xs">Value</TableHead>
+                            <TableHead className="text-xs">Pay</TableHead>
                             <TableHead className="text-xs">Status</TableHead>
                             <TableHead className="text-xs">AWB</TableHead>
                             <TableHead className="text-xs">Created</TableHead>
@@ -4023,7 +4024,7 @@ export function AdminDashboard() {
                         <TableBody>
                           {ordersLoading && orders.length === 0 ? (
                             <TableRow>
-                              <TableCell colSpan={10} className="text-center py-8">
+                              <TableCell colSpan={11} className="text-center py-8">
                                 Loading orders...
                               </TableCell>
                             </TableRow>
@@ -4086,6 +4087,13 @@ export function AdminDashboard() {
                                 </TableCell>
                                 <TableCell className="text-xs">{order.product_name}</TableCell>
                                 <TableCell className="text-xs whitespace-nowrap">₹{order.value}</TableCell>
+                                <TableCell className="text-xs">
+                                  {order.payment_type && (
+                                    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold ${order.payment_type === 'C' ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'}`}>
+                                      {order.payment_type === 'C' ? 'C' : 'P'}
+                                    </span>
+                                  )}
+                                </TableCell>
                                 <TableCell className="text-xs">{getStatusBadge(order.status)}</TableCell>
                                 <TableCell className="text-xs font-mono text-purple-600">{order.awb || order.airway_bill || order.airwaybill || 'N/A'}</TableCell>
                                 <TableCell className="text-xs">
@@ -4153,7 +4161,7 @@ export function AdminDashboard() {
                             ))
                           ) : (
                             <TableRow>
-                              <TableCell colSpan={10} className="text-center py-8 text-gray-500">
+                              <TableCell colSpan={11} className="text-center py-8 text-gray-500">
                                 No orders found
                               </TableCell>
                             </TableRow>
@@ -4258,6 +4266,11 @@ export function AdminDashboard() {
                                       {order.value && (
                                         <Badge variant="outline" className="text-xs px-1.5 py-0.5 h-auto bg-green-50 text-green-700 border-green-200">
                                           ₹{order.value}
+                                        </Badge>
+                                      )}
+                                      {order.payment_type && (
+                                        <Badge variant="outline" className={`text-xs px-1.5 py-0.5 h-auto ${order.payment_type === 'C' ? 'bg-orange-50 text-orange-700 border-orange-200' : 'bg-blue-50 text-blue-700 border-blue-200'}`}>
+                                          {order.payment_type === 'C' ? 'C' : 'P'}
                                         </Badge>
                                       )}
                                     </div>
