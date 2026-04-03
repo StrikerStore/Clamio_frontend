@@ -2903,19 +2903,26 @@ export function VendorDashboard() {
       }, 10000); // 10 second delay before cleanup
 
     } else if (isMobileBrowser) {
-      // Android / other mobile: link.click() generally works but needs delayed cleanup
-      console.log('📱 Mobile device: Using link.click() with delayed URL cleanup');
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-
-      // Delay blob URL cleanup — mobile browsers are slower to start downloads
-      setTimeout(() => {
-        window.URL.revokeObjectURL(url);
-      }, 5000); // 5 second delay before cleanup
+      // Android: link.click() from an async context is blocked by Chrome after the first
+      // download in a session. Instead, register the PDF on the backend and navigate to a
+      // real GET URL with Content-Disposition: attachment — treated as a browser navigation,
+      // never blocked regardless of how many downloads happen in the same session.
+      console.log('📱 Android: Using backend temp-download URL for reliable repeated downloads');
+      try {
+        const downloadUrl = await apiClient.prepareAndroidDownload(url, filename);
+        window.URL.revokeObjectURL(url); // free blob memory immediately
+        window.location.href = downloadUrl;
+      } catch (androidErr) {
+        console.error('📱 Android backend download failed, falling back to link.click()', androidErr);
+        // Fallback to old approach if backend call fails for any reason
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => { window.URL.revokeObjectURL(url); }, 5000);
+      }
 
     } else {
       // Desktop: Use link.click() approach — instant download

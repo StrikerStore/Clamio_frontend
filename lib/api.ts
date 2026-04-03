@@ -1505,6 +1505,42 @@ class ApiClient {
     }
   }
 
+  /**
+   * Android-only download helper.
+   * Converts a blob URL to base64, registers it on the backend for one-time download,
+   * and returns the full GET URL the Android browser can navigate to.
+   */
+  async prepareAndroidDownload(blobUrl: string, filename: string): Promise<string> {
+    const vendorToken = typeof window !== 'undefined' ? localStorage.getItem('vendorToken') : null;
+
+    // Read the blob URL back into an ArrayBuffer, then base64-encode it
+    const blobResponse = await fetch(blobUrl);
+    const buffer = await blobResponse.arrayBuffer();
+    const pdf_base64 = btoa(
+      new Uint8Array(buffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
+    );
+
+    const response = await fetch(`${API_BASE_URL}/orders/prepare-android-download`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(vendorToken && { 'Authorization': vendorToken }),
+      },
+      body: JSON.stringify({ pdf_base64, filename }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`prepare-android-download failed: ${response.status}`);
+    }
+
+    const data = await response.json();
+    if (!data.success || !data.token) {
+      throw new Error('prepare-android-download: no token returned');
+    }
+
+    return `${API_BASE_URL}/orders/temp-download/${data.token}`;
+  }
+
   // ==================== NOTIFICATION METHODS ====================
 
   /**
