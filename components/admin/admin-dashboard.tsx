@@ -3386,7 +3386,7 @@ export function AdminDashboard() {
                                               />
                                               <span className="text-xs">All Stores</span>
                                             </label>
-                                            {stores.map((store) => (
+                                            {stores.filter(store => showInactiveStoreOrders || store.status === 'active').map((store) => (
                                               <label key={store.account_code} className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
                                                 <input
                                                   type="checkbox"
@@ -3708,7 +3708,7 @@ export function AdminDashboard() {
                                   )}
                                 </div>
                                 <div className="max-h-60 overflow-y-auto space-y-1">
-                                  {stores.map((store) => (
+                                  {stores.filter(store => showInactiveStoreOrders || store.status === 'active').map((store) => (
                                     <label key={store.account_code} className="flex items-center space-x-2 p-2 hover:bg-gray-50 rounded cursor-pointer">
                                       <input
                                         type="checkbox"
